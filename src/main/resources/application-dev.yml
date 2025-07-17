@@ -1,0 +1,21 @@
+spring:
+  redis:
+    host: localhost
+    port: 6379
+  rabbitmq:
+    host: localhost
+    port: 5672
+
+security:
+  oauth2:
+    resourceserver:
+      jwt:
+        jwk-set-uri: http://localhost:8081/.well-known/jwks.json
+  jwt:
+    issuer: account-service-dev
+    audience: gateway-dev
+
+logging:
+  level:
+    ai.shreds: DEBUG
+    org.springframework.security: DEBUG

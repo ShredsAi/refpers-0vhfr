@@ -1,0 +1,136 @@
+spring:
+  application:
+    name: gateway-security-shred
+
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      routes:
+        - id: actuator-health
+          uri: no://op
+          predicates:
+            - Path=/health
+          filters:
+            - name: SetPath
+              args:
+                template: /actuator/health
+        - id: actuator-info
+          uri: no://op
+          predicates:
+            - Path=/info
+          filters:
+            - name: SetPath
+              args:
+                template: /actuator/info
+        - id: actuator-metrics
+          uri: no://op
+          predicates:
+            - Path=/metrics
+          filters:
+            - name: SetPath
+              args:
+                template: /actuator/metrics
+      default-filters:
+        - name: RequestSize
+          args:
+            maxSize: 10MB
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${JWKS_URI:http://localhost:8081/.well-known/jwks.json}
+
+  redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    timeout: 2000
+    database: 0
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 2
+        max-wait: -1ms
+
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: /
+    listener:
+      simple:
+        retry:
+          enabled: true
+          initial-interval: 1000
+          max-attempts: 3
+          max-interval: 10000
+          multiplier: 2.0
+
+server:
+  port: 8080
+  error:
+    include-message: always
+    include-binding-errors: always
+
+security:
+  jwt:
+    issuer: ${JWT_ISSUER:account-service}
+    audience: ${JWT_AUDIENCE:gateway}
+    token-cache-ttl: 3600 # seconds
+    jwks-cache-ttl: 86400 # 24 hours
+
+gateway:
+  routes:
+    default-private-patterns: /api/**,/admin/**
+    default-public-patterns: /health,/info,/metrics
+
+rate-limit:
+  enabled: true
+  default:
+    requests-per-second: 50
+    burst-capacity: 100
+  cache:
+    ttl: 3600
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+  health:
+    redis:
+      enabled: true
+    rabbit:
+      enabled: true
+
+logging:
+  level:
+    root: INFO
+    ai.shreds: DEBUG
+    org.springframework.security: INFO
+    org.springframework.cloud.gateway: INFO
+
+request:
+  context:
+    topic: authenticated-requests
+    exchange: gateway.events
+    routing-key: auth.request
+
+circuit-breaker:
+  default:
+    sliding-window-size: 10
+    failure-rate-threshold: 50
+    wait-duration-in-open-state: 60000
+    permitted-number-of-calls-in-half-open-state: 3
+    slow-call-rate-threshold: 100
+    slow-call-duration-threshold: 60000
