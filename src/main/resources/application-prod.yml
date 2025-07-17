@@ -1,0 +1,20 @@
+spring:
+  redis:
+    cluster:
+      nodes: ${REDIS_CLUSTER_NODES}
+  rabbitmq:
+    addresses: ${RABBITMQ_ADDRESSES}
+
+security:
+  oauth2:
+    resourceserver:
+      jwt:
+        jwk-set-uri: ${PROD_JWKS_URI}
+  jwt:
+    issuer: ${PROD_JWT_ISSUER}
+    audience: ${PROD_JWT_AUDIENCE}
+
+logging:
+  level:
+    root: WARN
+    ai.shreds: INFO
