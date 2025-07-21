@@ -21,7 +21,7 @@ public class SharedEmailAddressValue {
         validate();
     }
 
-    private void validate() {
+    public void validate() {
         // Additional custom validation can be added here
         if (!email.contains("@") || !email.contains(".")) {
             throw new IllegalArgumentException("Invalid email format: " + email);

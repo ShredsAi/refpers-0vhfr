@@ -19,9 +19,8 @@
 
     <properties>
         <java.version>17</java.version>
-        <spring-security-oauth2.version>1.2.0</spring-security-oauth2.version>
-        <nimbus-jose-jwt.version>9.37.0</nimbus-jose-jwt.version>
-        <totp-spring-boot-starter.version>1.7.0</totp-spring-boot-starter.version>
+        <nimbus-jose-jwt.version>10.4</nimbus-jose-jwt.version>
+        <totp-spring-boot-starter.version>1.7.1</totp-spring-boot-starter.version>
     </properties>
 
     <dependencies>
@@ -39,7 +38,6 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-oauth2-authorization-server</artifactId>
-            <version>${spring-security-oauth2.version}</version>
         </dependency>
         
         <!-- Database -->
