@@ -1,0 +1,210 @@
+package ai.shreds.application.services;
+
+import ai.shreds.application.dtos.ApplicationSessionDTO;
+import ai.shreds.application.ports.ApplicationAuthenticationInputPort;
+import ai.shreds.application.ports.ApplicationEventPublisherOutputPort;
+import ai.shreds.application.services.ApplicationJwtService;
+import ai.shreds.domain.ports.DomainInputPortAuthentication;
+import ai.shreds.domain.ports.DomainInputPortSecuritySettings;
+import ai.shreds.shared.dtos.SharedLoginRequestDTO;
+import ai.shreds.shared.dtos.SharedLoginResponseDTO;
+import ai.shreds.shared.dtos.SharedAuthenticationAttemptEventDTO;
+import ai.shreds.shared.dtos.SharedAuthenticationSuccessfulEventDTO;
+import ai.shreds.shared.dtos.SharedAuthenticationFailedEventDTO;
+import ai.shreds.shared.dtos.SharedAccountLockedEventDTO;
+import ai.shreds.shared.dtos.SharedUserLoggedOutEventDTO;
+import ai.shreds.domain.entities.DomainAccountEntity;
+import ai.shreds.domain.exceptions.DomainInvalidCredentialsException;
+import ai.shreds.domain.exceptions.DomainAccountNotActiveException;
+import ai.shreds.domain.exceptions.DomainMfaRequiredException;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * Application service implementing authentication operations.
+ */
+@Service
+@Transactional
+public class ApplicationAuthenticationService implements ApplicationAuthenticationInputPort {
+
+    private final DomainInputPortAuthentication domainAuthenticationService;
+    private final DomainInputPortSecuritySettings domainSecurityService;
+    private final ApplicationEventPublisherOutputPort eventPublisher;
+    private final ApplicationJwtService jwtService;
+
+    @Autowired
+    public ApplicationAuthenticationService(
+            DomainInputPortAuthentication domainAuthenticationService,
+            DomainInputPortSecuritySettings domainSecurityService,
+            ApplicationEventPublisherOutputPort eventPublisher,
+            ApplicationJwtService jwtService) {
+        this.domainAuthenticationService = domainAuthenticationService;
+        this.domainSecurityService = domainSecurityService;
+        this.eventPublisher = eventPublisher;
+        this.jwtService = jwtService;
+    }
+
+    @Override
+    public SharedLoginResponseDTO authenticateUser(SharedLoginRequestDTO request) {
+        try {
+            // Publish authentication attempt event
+            SharedAuthenticationAttemptEventDTO attemptEvent = new SharedAuthenticationAttemptEventDTO();
+            Map<String, Object> context = new HashMap<>();
+            context.put("username", request.getUsername());
+            context.put("timestamp", Instant.now().toString());
+            attemptEvent.setAuthenticationContext(context);
+            eventPublisher.publishEvent(attemptEvent);
+
+            // Authenticate credentials through domain service
+            DomainAccountEntity account = domainAuthenticationService.authenticateWithCredentials(
+                    request.getUsername(), 
+                    request.getPassword()
+            );
+
+            // Validate account status
+            validateAccountStatus(account.getAccountId().toString());
+
+            // Check if account is locked
+            if (domainSecurityService.checkAccountLockStatus(account.getAccountId().toString())) {
+                handleFailedAuthentication(account.getAccountId().toString(), "Account is locked");
+                throw new DomainAccountNotActiveException("Account is locked", "LOCKED");
+            }
+
+            // Check if MFA is required
+            var securitySettings = domainSecurityService.getSecuritySettings(account.getAccountId().toString());
+            if (securitySettings.isMfaEnabled()) {
+                // Generate MFA challenge
+                String challengeId = UUID.randomUUID().toString();
+                
+                SharedLoginResponseDTO response = SharedLoginResponseDTO.withMfaChallenge(challengeId);
+                return response;
+            }
+
+            // Complete authentication if no MFA required
+            ApplicationSessionDTO session = completeAuthentication(account.getAccountId().toString());
+            return SharedLoginResponseDTO.withTokens(session.getAccessToken(), session.getRefreshToken());
+
+        } catch (DomainInvalidCredentialsException e) {
+            handleFailedAuthentication(request.getUsername(), "Invalid credentials");
+            throw e;
+        } catch (DomainAccountNotActiveException e) {
+            handleFailedAuthentication(request.getUsername(), "Account not active: " + e.getAccountStatus());
+            throw e;
+        } catch (DomainMfaRequiredException e) {
+            // Return MFA challenge response
+            return SharedLoginResponseDTO.withMfaChallenge(e.getChallengeId());
+        }
+    }
+
+    @Override
+    public void validateAccountStatus(String accountId) {
+        try {
+            boolean isValid = domainAuthenticationService.validateAccountStatus(accountId);
+            if (!isValid) {
+                throw new DomainAccountNotActiveException("Account status is not active", "INACTIVE");
+            }
+        } catch (Exception e) {
+            throw new DomainAccountNotActiveException("Failed to validate account status: " + e.getMessage(), "UNKNOWN");
+        }
+    }
+
+    @Override
+    public void handleFailedAuthentication(String accountId, String reason) {
+        try {
+            // Record failed attempt in domain
+            domainAuthenticationService.recordFailedLoginAttempt(accountId);
+
+            // Get security settings to check attempts
+            var securitySettings = domainSecurityService.getSecuritySettings(accountId);
+            
+            // Publish failed authentication event
+            SharedAuthenticationFailedEventDTO failedEvent = new SharedAuthenticationFailedEventDTO();
+            failedEvent.setAccountId(accountId);
+            failedEvent.setReason(reason);
+            failedEvent.setAttempts(securitySettings.getLoginAttempts());
+            eventPublisher.publishEvent(failedEvent);
+
+            // Check if account should be locked (5 failed attempts)
+            if (securitySettings.getLoginAttempts() >= 5) {
+                // Apply lockout policy
+                domainSecurityService.applyLockoutPolicy(accountId, securitySettings.getLoginAttempts());
+                
+                // Publish account locked event
+                SharedAccountLockedEventDTO lockedEvent = new SharedAccountLockedEventDTO();
+                lockedEvent.setAccountId(accountId);
+                lockedEvent.setLockReason("Too many failed login attempts");
+                lockedEvent.setLockedUntil(Instant.now().plusSeconds(15 * 60).toString()); // 15 minutes
+                eventPublisher.publishEvent(lockedEvent);
+            }
+        } catch (Exception e) {
+            // Log error but don't throw to avoid masking original authentication error
+            System.err.println("Failed to handle failed authentication: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public ApplicationSessionDTO completeAuthentication(String accountId) {
+        try {
+            // Record successful login
+            domainAuthenticationService.recordSuccessfulLogin(accountId);
+
+            // Generate tokens
+            Map<String, Object> claims = new HashMap<>();
+            claims.put("account_id", accountId);
+            claims.put("scope", "openid profile email");
+            
+            String accessToken = jwtService.generateAccessToken(accountId, claims);
+            String refreshToken = jwtService.generateRefreshToken(accountId);
+
+            // Create session through domain service
+            var session = domainAuthenticationService.createAuthenticationSession(accountId, accessToken, refreshToken);
+
+            // Create session DTO
+            ApplicationSessionDTO sessionDTO = new ApplicationSessionDTO(
+                    session.getSessionId().toString(),
+                    accountId,
+                    accessToken,
+                    refreshToken,
+                    session.getExpiresAt().toEpochMilli()
+            );
+
+            // Publish successful authentication event
+            SharedAuthenticationSuccessfulEventDTO successEvent = new SharedAuthenticationSuccessfulEventDTO();
+            successEvent.setAccountId(accountId);
+            successEvent.setSessionId(session.getSessionId().toString());
+            successEvent.setLoginAt(Instant.now().toString());
+            eventPublisher.publishEvent(successEvent);
+
+            return sessionDTO;
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to complete authentication: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void logout(String token) {
+        try {
+            // Extract account ID from token
+            String accountId = jwtService.extractAccountId(token);
+            
+            // Revoke the token
+            jwtService.revokeToken(token);
+
+            // Publish logout event
+            SharedUserLoggedOutEventDTO logoutEvent = new SharedUserLoggedOutEventDTO();
+            logoutEvent.setAccountId(accountId);
+            logoutEvent.setSessionId(UUID.randomUUID().toString()); // Could be extracted from token
+            eventPublisher.publishEvent(logoutEvent);
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to logout user: " + e.getMessage(), e);
+        }
+    }
+}
