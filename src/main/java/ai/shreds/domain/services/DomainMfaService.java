@@ -8,11 +8,13 @@ import ai.shreds.domain.ports.DomainOutputPortCryptoService;
 import ai.shreds.domain.ports.DomainOutputPortMfaChallengeRepository;
 import ai.shreds.domain.ports.DomainOutputPortSecurityRepository;
 import ai.shreds.shared.enums.SharedMfaMethodEnum;
+import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
+@Service
 public class DomainMfaService implements DomainInputPortMfa {
 
     private final DomainOutputPortMfaChallengeRepository challengeRepository;

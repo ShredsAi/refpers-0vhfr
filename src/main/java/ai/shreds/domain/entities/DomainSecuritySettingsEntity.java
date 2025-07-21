@@ -3,19 +3,41 @@ package ai.shreds.domain.entities;
 import ai.shreds.shared.dtos.SharedSecuritySettingsDTO;
 import ai.shreds.shared.enums.SharedMfaMethodEnum;
 
+import jakarta.persistence.*;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
+@Entity
+@Table(name = "security_settings")
 public class DomainSecuritySettingsEntity {
 
+    @Id
+    @Column(name = "security_settings_id")
     private UUID securitySettingsId;
+    
+    @Column(name = "account_id", unique = true, nullable = false)
     private UUID accountId;
+    
+    @Column(name = "mfa_enabled", nullable = false)
     private boolean mfaEnabled;
+    
+    @Enumerated(EnumType.STRING)
+    @Column(name = "mfa_method", length = 10)
     private SharedMfaMethodEnum mfaMethod;
+    
+    @Column(name = "login_attempts", nullable = false)
     private int loginAttempts;
+    
+    @Column(name = "locked_until")
     private Instant lockedUntil;
+    
+    @Column(name = "password_changed_at", nullable = false)
     private Instant passwordChangedAt;
+
+    // Default constructor for JPA
+    public DomainSecuritySettingsEntity() {
+    }
 
     public DomainSecuritySettingsEntity(UUID securitySettingsId,
                                         UUID accountId,
@@ -92,5 +114,33 @@ public class DomainSecuritySettingsEntity {
         dto.setLockedUntil(lockedUntil != null ? lockedUntil.toString() : null);
         dto.setPasswordChangedAt(passwordChangedAt != null ? passwordChangedAt.toString() : null);
         return dto;
+    }
+
+    public void setSecuritySettingsId(UUID securitySettingsId) {
+        this.securitySettingsId = securitySettingsId;
+    }
+
+    public void setAccountId(UUID accountId) {
+        this.accountId = accountId;
+    }
+
+    public void setMfaEnabled(boolean mfaEnabled) {
+        this.mfaEnabled = mfaEnabled;
+    }
+
+    public void setMfaMethod(SharedMfaMethodEnum mfaMethod) {
+        this.mfaMethod = mfaMethod;
+    }
+
+    public void setLoginAttempts(int loginAttempts) {
+        this.loginAttempts = loginAttempts;
+    }
+
+    public void setLockedUntil(Instant lockedUntil) {
+        this.lockedUntil = lockedUntil;
+    }
+
+    public void setPasswordChangedAt(Instant passwordChangedAt) {
+        this.passwordChangedAt = passwordChangedAt;
     }
 }

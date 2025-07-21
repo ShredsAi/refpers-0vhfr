@@ -5,6 +5,7 @@ import ai.shreds.domain.entities.DomainAuthenticationSessionEntity;
 import ai.shreds.domain.exceptions.DomainInvalidTokenException;
 import ai.shreds.domain.ports.*;
 import ai.shreds.domain.value_objects.DomainPkceChallengeValidator;
+import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -12,6 +13,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+@Service
 public class DomainOAuth2AuthorizationService implements DomainInputPortOAuth2Authorization {
 
     private final DomainOutputPortSessionRepository sessionRepository;

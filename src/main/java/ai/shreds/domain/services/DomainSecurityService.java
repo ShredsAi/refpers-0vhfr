@@ -3,11 +3,13 @@ package ai.shreds.domain.services;
 import ai.shreds.domain.entities.DomainSecuritySettingsEntity;
 import ai.shreds.domain.ports.DomainInputPortSecuritySettings;
 import ai.shreds.domain.ports.DomainOutputPortSecurityRepository;
+import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
+@Service
 public class DomainSecurityService implements DomainInputPortSecuritySettings {
 
     private final DomainOutputPortSecurityRepository securityRepository;

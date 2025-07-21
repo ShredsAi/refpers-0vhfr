@@ -1,7 +1,9 @@
 package ai.shreds.domain.value_objects;
 
+import org.springframework.stereotype.Component;
 import java.util.regex.Pattern;
 
+@Component
 public class DomainPasswordPolicyValidator {
 
     private static final int MIN_PASSWORD_LENGTH = 8;

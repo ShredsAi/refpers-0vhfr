@@ -6,11 +6,13 @@ import ai.shreds.domain.entities.DomainSecuritySettingsEntity;
 import ai.shreds.domain.exceptions.DomainAccountNotActiveException;
 import ai.shreds.domain.exceptions.DomainInvalidCredentialsException;
 import ai.shreds.domain.ports.*;
+import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
+@Service
 public class DomainAuthenticationService implements DomainInputPortAuthentication {
 
     private final DomainOutputPortAccountRepository accountRepository;

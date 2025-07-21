@@ -24,8 +24,8 @@ public class InfrastructureSmsGatewayClient {
 
     @Autowired
     public InfrastructureSmsGatewayClient(RestTemplate restTemplate,
-                                          @Value("${mfa.sms.gateway-url:${SMS_GATEWAY_URL}}") String smsGatewayUrl,
-                                          @Value("${mfa.sms.api-key:${SMS_API_KEY}}") String apiKey) {
+                                          @Value("${mfa.sms.gateway-url:http://localhost:8080/mock-sms}") String smsGatewayUrl,
+                                          @Value("${mfa.sms.api-key:test-api-key}") String apiKey) {
         this.restTemplate = restTemplate;
         this.smsGatewayUrl = smsGatewayUrl;
         this.apiKey = apiKey;

@@ -5,11 +5,13 @@ import ai.shreds.domain.exceptions.DomainInvalidTokenException;
 import ai.shreds.domain.ports.DomainInputPortTokenService;
 import ai.shreds.domain.ports.DomainOutputPortCryptoService;
 import ai.shreds.domain.ports.DomainOutputPortSessionRepository;
+import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 
+@Service
 public class DomainTokenService implements DomainInputPortTokenService {
 
     private final DomainOutputPortCryptoService cryptoService;

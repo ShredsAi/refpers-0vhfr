@@ -6,6 +6,7 @@ import ai.shreds.domain.exceptions.DomainInvalidCredentialsException;
 import ai.shreds.domain.exceptions.DomainInvalidTokenException;
 import ai.shreds.domain.ports.*;
 import ai.shreds.domain.value_objects.DomainPasswordPolicyValidator;
+import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -13,6 +14,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
+@Service
 public class DomainPasswordService implements DomainInputPortPasswordManagement {
 
     private final DomainOutputPortAccountRepository accountRepository;
