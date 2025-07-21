@@ -5,6 +5,7 @@ import ai.shreds.domain.entities.DomainAuthenticationSessionEntity;
 import ai.shreds.domain.exceptions.DomainInvalidTokenException;
 import ai.shreds.domain.ports.*;
 import ai.shreds.domain.value_objects.DomainPkceChallengeValidator;
+import ai.shreds.domain.value_objects.DomainTokenResultValue;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -22,7 +23,6 @@ public class DomainOAuth2AuthorizationService implements DomainInputPortOAuth2Au
     private final DomainPkceChallengeValidator pkceChallengeValidator;
     private final DomainOutputPortCryptoService cryptoService;
 
-    // Temporary storage for authorization codes (in real implementation, use cache)
     private final Map<String, AuthorizationCodeData> authorizationCodes = new HashMap<>();
 
     public DomainOAuth2AuthorizationService(
@@ -40,17 +40,14 @@ public class DomainOAuth2AuthorizationService implements DomainInputPortOAuth2Au
 
     @Override
     public String generateAuthorizationCode(String accountId, String clientId, String redirectUri, String codeChallenge) {
-        // Validate account exists and is active
         DomainAccountEntity account = accountRepository.findById(accountId);
         if (account == null || !account.isActive()) {
             throw new DomainInvalidTokenException("Invalid or inactive account");
         }
 
-        // Generate authorization code
         String authorizationCode = cryptoService.generateSecureToken();
-        Instant expiresAt = Instant.now().plus(10, ChronoUnit.MINUTES); // 10 minutes expiration
+        Instant expiresAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
-        // Store authorization code with metadata (in real implementation, use cache with TTL)
         AuthorizationCodeData codeData = new AuthorizationCodeData(
                 authorizationCode, accountId, clientId, redirectUri, codeChallenge, expiresAt
         );
@@ -60,22 +57,18 @@ public class DomainOAuth2AuthorizationService implements DomainInputPortOAuth2Au
     }
 
     @Override
-    public DomainAuthenticationSessionEntity validateAndExchangeCode(String code, String clientId, String codeVerifier) {
-        // Retrieve and validate authorization code
+    public DomainTokenResultValue validateAndExchangeCode(String code, String clientId, String codeVerifier) {
         AuthorizationCodeData codeData = authorizationCodes.get(code);
         if (codeData == null || codeData.isExpired() || !codeData.getClientId().equals(clientId)) {
             throw new DomainInvalidTokenException("Invalid or expired authorization code");
         }
 
-        // Validate PKCE challenge
         if (!pkceChallengeValidator.validateCodeChallenge(codeData.getCodeChallenge(), codeVerifier, "S256")) {
             throw new DomainInvalidTokenException("Invalid PKCE code verifier");
         }
 
-        // Remove used authorization code
         authorizationCodes.remove(code);
 
-        // Generate tokens
         Map<String, Object> claims = new HashMap<>();
         claims.put("client_id", clientId);
         claims.put("scope", "read write");
@@ -83,56 +76,54 @@ public class DomainOAuth2AuthorizationService implements DomainInputPortOAuth2Au
         String accessToken = tokenService.generateAccessToken(codeData.getAccountId(), claims);
         String refreshToken = tokenService.generateRefreshToken(codeData.getAccountId());
 
-        // Create and save session
         DomainAuthenticationSessionEntity session = new DomainAuthenticationSessionEntity(
                 UUID.randomUUID(),
                 UUID.fromString(codeData.getAccountId()),
                 cryptoService.hashToken(accessToken),
                 cryptoService.hashToken(refreshToken),
-                Instant.now().plus(1, ChronoUnit.HOURS), // 1 hour expiration for access token
+                Instant.now().plus(1, ChronoUnit.HOURS),
                 Instant.now(),
                 false
         );
 
-        return sessionRepository.save(session);
+        DomainAuthenticationSessionEntity savedSession = sessionRepository.save(session);
+
+        return new DomainTokenResultValue(savedSession, accessToken, refreshToken);
     }
 
     @Override
-    public DomainAuthenticationSessionEntity refreshAccessToken(String refreshToken) {
+    public DomainTokenResultValue refreshAccessToken(String refreshToken) {
         String refreshTokenHash = cryptoService.hashToken(refreshToken);
         
-        // Find session by refresh token
         DomainAuthenticationSessionEntity session = sessionRepository.findByRefreshTokenHash(refreshTokenHash);
         if (session == null || !session.isValid()) {
             throw new DomainInvalidTokenException("Invalid or expired refresh token");
         }
 
-        // Revoke old session
         session.revoke();
-        sessionRepository.revokeSession(session.getSessionId().toString());
+        sessionRepository.save(session);
 
-        // Generate new tokens
         Map<String, Object> claims = new HashMap<>();
         claims.put("refreshed", true);
         
         String newAccessToken = tokenService.generateAccessToken(session.getAccountId().toString(), claims);
         String newRefreshToken = tokenService.generateRefreshToken(session.getAccountId().toString());
 
-        // Create new session with rotated tokens
         DomainAuthenticationSessionEntity newSession = new DomainAuthenticationSessionEntity(
                 UUID.randomUUID(),
                 session.getAccountId(),
                 cryptoService.hashToken(newAccessToken),
                 cryptoService.hashToken(newRefreshToken),
-                Instant.now().plus(1, ChronoUnit.HOURS), // 1 hour expiration
+                Instant.now().plus(1, ChronoUnit.HOURS),
                 Instant.now(),
                 false
         );
 
-        return sessionRepository.save(newSession);
+        DomainAuthenticationSessionEntity savedNewSession = sessionRepository.save(newSession);
+
+        return new DomainTokenResultValue(savedNewSession, newAccessToken, newRefreshToken);
     }
 
-    // Inner class to hold authorization code data
     private static class AuthorizationCodeData {
         private final String code;
         private final String accountId;

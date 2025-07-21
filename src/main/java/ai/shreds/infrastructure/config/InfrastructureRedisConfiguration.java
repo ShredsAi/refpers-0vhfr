@@ -1,38 +1,23 @@
 package ai.shreds.infrastructure.config;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 /**
  * Configuration for Redis cache and session management.
+ * Relies on Spring Boot's auto-configuration for the RedisConnectionFactory,
+ * which correctly uses properties like spring.redis.url or spring.redis.host/port.
  */
 @Configuration
 public class InfrastructureRedisConfiguration {
 
-    @Value("${spring.data.redis.host:localhost}")
-    private String redisHost;
-
-    @Value("${spring.data.redis.port:6379}")
-    private Integer redisPort;
-
-    @Value("${spring.data.redis.password:}")
-    private String redisPassword;
-
-    @Bean
-    public RedisConnectionFactory redisConnectionFactory() {
-        LettuceConnectionFactory factory = new LettuceConnectionFactory(redisHost, redisPort);
-        if (redisPassword != null && !redisPassword.trim().isEmpty()) {
-            factory.setPassword(redisPassword);
-        }
-        factory.setValidateConnection(true);
-        return factory;
-    }
+    // The RedisConnectionFactory bean is now auto-configured by Spring Boot.
+    // This allows it to correctly pick up properties from application.yml or
+    // dynamic properties from tests (e.g., Testcontainers URL).
 
     @Bean
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
@@ -43,7 +28,7 @@ public class InfrastructureRedisConfiguration {
         template.setKeySerializer(new StringRedisSerializer());
         template.setHashKeySerializer(new StringRedisSerializer());
         
-        // Use JSON serializer for values
+        // Use JSON serializer for values to store complex objects
         template.setValueSerializer(new GenericJackson2JsonRedisSerializer());
         template.setHashValueSerializer(new GenericJackson2JsonRedisSerializer());
         

@@ -3,6 +3,7 @@ package ai.shreds.domain.entities;
 import ai.shreds.shared.dtos.SharedAuthenticationSessionDTO;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.GenericGenerator;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -11,6 +12,8 @@ import java.util.UUID;
 public class DomainAuthenticationSessionEntity {
 
     @Id
+    @GeneratedValue(generator = "UUID")
+    @GenericGenerator(name = "UUID", strategy = "org.hibernate.id.UUIDGenerator")
     @Column(name = "session_id")
     private UUID sessionId;
     

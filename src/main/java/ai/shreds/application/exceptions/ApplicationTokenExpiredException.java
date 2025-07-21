@@ -11,6 +11,11 @@ public class ApplicationTokenExpiredException extends RuntimeException {
         this.tokenType = tokenType;
     }
 
+    public ApplicationTokenExpiredException(String message, String tokenType, Throwable cause) {
+        super(message, cause);
+        this.tokenType = tokenType;
+    }
+
     public String getTokenType() {
         return tokenType;
     }

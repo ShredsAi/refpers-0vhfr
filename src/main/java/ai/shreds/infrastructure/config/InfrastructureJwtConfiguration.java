@@ -1,10 +1,10 @@
 package ai.shreds.infrastructure.config;
 
 import ai.shreds.shared.utils.SharedJwtUtilService;
-import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
-import com.nimbusds.jose.jwk.JWK;
+import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.OctetSequenceKey;
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,7 +16,6 @@ import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
 
 @Configuration
 public class InfrastructureJwtConfiguration {
@@ -25,14 +24,18 @@ public class InfrastructureJwtConfiguration {
     private String jwtSecret;
 
     @Value("${jwt.expiration}")
-    private long jwtExpiration;
+    private Long jwtExpiration;
 
     @Value("${jwt.refresh-token.expiration}")
-    private long refreshTokenExpiration;
+    private Long refreshTokenExpiration;
 
     @Bean
     public SharedJwtUtilService jwtUtilService() {
-        return new SharedJwtUtilService(jwtSecret, jwtExpiration);
+        try {
+            return new SharedJwtUtilService(jwtSecret, jwtExpiration, refreshTokenExpiration);
+        } catch (JOSEException e) {
+            throw new RuntimeException("Failed to initialize JWT utility service", e);
+        }
     }
 
     @Bean
@@ -54,11 +57,11 @@ public class InfrastructureJwtConfiguration {
         return new NimbusJwtEncoder(jwkSource);
     }
 
-    public long getJwtExpiration() {
+    public Long getJwtExpiration() {
         return jwtExpiration;
     }
 
-    public long getRefreshTokenExpiration() {
+    public Long getRefreshTokenExpiration() {
         return refreshTokenExpiration;
     }
 }

@@ -14,6 +14,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.validation.annotation.Validated;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -29,6 +31,7 @@ import java.time.format.DateTimeFormatter;
 @Validated
 public class AdapterOAuth2Controller {
     
+    private static final Logger logger = LoggerFactory.getLogger(AdapterOAuth2Controller.class);
     private final ApplicationOAuth2InputPort applicationOAuth2Service;
     
     @Autowired
@@ -38,15 +41,6 @@ public class AdapterOAuth2Controller {
     
     /**
      * Initiates the OAuth 2.0 Authorization Code Flow with PKCE.
-     * 
-     * @param clientId The OAuth2 client identifier
-     * @param redirectUri The redirect URI for the client
-     * @param responseType The OAuth2 response type (should be "code")
-     * @param scope The requested OAuth2 scopes
-     * @param state The state parameter for CSRF protection
-     * @param codeChallenge The PKCE code challenge
-     * @param codeChallengeMethod The PKCE code challenge method
-     * @return Redirect response to the client's redirect URI with authorization code
      */
     @GetMapping("/authorize")
     public ResponseEntity<Void> initiateAuthorization(
@@ -59,6 +53,8 @@ public class AdapterOAuth2Controller {
             @RequestParam("code_challenge_method") String codeChallengeMethod) {
         
         try {
+            logger.info("Starting OAuth2 authorization request for clientId: {}, redirectUri: {}", clientId, redirectUri);
+            
             // Validate required parameters
             validateAuthorizationRequest(clientId, redirectUri, responseType, codeChallenge, codeChallengeMethod);
             
@@ -67,8 +63,12 @@ public class AdapterOAuth2Controller {
                 clientId, redirectUri, responseType, scope, state, codeChallenge, codeChallengeMethod
             );
             
+            logger.debug("Calling application service to initiate authorization flow");
+            
             // Process authorization request
             ApplicationAuthorizationCodeDTO authorizationCode = applicationOAuth2Service.initiateAuthorizationFlow(params);
+            
+            logger.info("Successfully generated authorization code for clientId: {}", clientId);
             
             // Build redirect URL with authorization code
             String redirectUrl = buildRedirectUrl(redirectUri, authorizationCode.getCode(), state);
@@ -78,9 +78,11 @@ public class AdapterOAuth2Controller {
                     .build();
                     
         } catch (Exception e) {
+            logger.error("OAuth2 authorization failed for clientId: {}, error: {}", clientId, e.getMessage(), e);
+            
             // Log error and redirect to error page or return error response
             String errorRedirectUrl = buildErrorRedirectUrl(redirectUri, "server_error", 
-                    "An error occurred during authorization", state);
+                    "An error occurred during authorization: " + e.getMessage(), state);
             
             return ResponseEntity.status(HttpStatus.FOUND)
                     .header("Location", errorRedirectUrl)
@@ -90,13 +92,6 @@ public class AdapterOAuth2Controller {
     
     /**
      * Exchanges an authorization code for access and refresh tokens.
-     * 
-     * @param grantType The OAuth2 grant type (should be "authorization_code")
-     * @param code The authorization code
-     * @param redirectUri The redirect URI used in the authorization request
-     * @param clientId The OAuth2 client identifier
-     * @param codeVerifier The PKCE code verifier
-     * @return Token response containing access and refresh tokens
      */
     @PostMapping("/token")
     public ResponseEntity<SharedOAuth2TokenResponseDTO> exchangeToken(
@@ -132,10 +127,6 @@ public class AdapterOAuth2Controller {
     
     /**
      * Refreshes an access token using a refresh token.
-     * 
-     * @param grantType The OAuth2 grant type (should be "refresh_token")
-     * @param refreshToken The refresh token
-     * @return New token response with refreshed access token
      */
     @PostMapping("/refresh")
     public ResponseEntity<SharedOAuth2TokenResponseDTO> refreshToken(

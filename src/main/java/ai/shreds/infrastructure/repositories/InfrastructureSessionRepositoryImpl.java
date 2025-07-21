@@ -37,12 +37,7 @@ public class InfrastructureSessionRepositoryImpl implements DomainOutputPortSess
     @Transactional(readOnly = true)
     public DomainAuthenticationSessionEntity findByRefreshTokenHash(String tokenHash) {
         try {
-            return jpaRepository.findByRefreshTokenHash(tokenHash)
-                    .orElseThrow(() -> new InfrastructurePersistenceException(
-                            "Authentication session not found for refresh token hash",
-                            DomainAuthenticationSessionEntity.class.getSimpleName(),
-                            "findByRefreshTokenHash"
-                    ));
+            return jpaRepository.findByRefreshTokenHash(tokenHash).orElse(null);
         } catch (Exception e) {
             throw new InfrastructurePersistenceException(
                     "Failed to find session by refresh token hash: " + e.getMessage(),
@@ -56,12 +51,7 @@ public class InfrastructureSessionRepositoryImpl implements DomainOutputPortSess
     @Transactional(readOnly = true)
     public DomainAuthenticationSessionEntity findByAccessTokenHash(String tokenHash) {
         try {
-            return jpaRepository.findByAccessTokenHash(tokenHash)
-                    .orElseThrow(() -> new InfrastructurePersistenceException(
-                            "Authentication session not found for access token hash",
-                            DomainAuthenticationSessionEntity.class.getSimpleName(),
-                            "findByAccessTokenHash"
-                    ));
+            return jpaRepository.findByAccessTokenHash(tokenHash).orElse(null);
         } catch (Exception e) {
             throw new InfrastructurePersistenceException(
                     "Failed to find session by access token hash: " + e.getMessage(),
@@ -76,11 +66,8 @@ public class InfrastructureSessionRepositoryImpl implements DomainOutputPortSess
         try {
             UUID sessionUuid = UUID.fromString(sessionId);
             if (!jpaRepository.existsBySessionId(sessionUuid)) {
-                throw new InfrastructurePersistenceException(
-                        "Session not found for sessionId: " + sessionId,
-                        DomainAuthenticationSessionEntity.class.getSimpleName(),
-                        "revokeSession"
-                );
+                // Session doesn't exist - this is acceptable for revocation
+                return;
             }
             jpaRepository.updateIsRevokedBySessionId(sessionUuid, true);
         } catch (IllegalArgumentException e) {

@@ -11,6 +11,11 @@ public class ApplicationInvalidAuthCodeException extends RuntimeException {
         this.code = code;
     }
 
+    public ApplicationInvalidAuthCodeException(String message, String code, Throwable cause) {
+        super(message, cause);
+        this.code = code;
+    }
+
     public String getCode() {
         return code;
     }

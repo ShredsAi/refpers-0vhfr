@@ -19,7 +19,8 @@ spring:
   
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      # Use 'validate' to ensure entities match the schema.sql, instead of 'create-drop' which wipes the data.
+      ddl-auto: validate
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect

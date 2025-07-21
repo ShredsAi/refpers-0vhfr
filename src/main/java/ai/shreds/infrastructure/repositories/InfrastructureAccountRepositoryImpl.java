@@ -20,34 +20,41 @@ public class InfrastructureAccountRepositoryImpl implements DomainOutputPortAcco
 
     @Override
     public DomainAccountEntity findByUsername(String username) {
-        return jpaRepository.findByUsername(username)
-                .orElseThrow(() -> new InfrastructurePersistenceException(
-                        "Failed to find account by username: " + username,
-                        DomainAccountEntity.class.getSimpleName(),
-                        "findByUsername"));
+        try {
+            return jpaRepository.findByUsername(username).orElse(null);
+        } catch (Exception e) {
+            throw new InfrastructurePersistenceException(
+                    "Failed to find account by username: " + username,
+                    DomainAccountEntity.class.getSimpleName(),
+                    "findByUsername");
+        }
     }
 
     @Override
     public DomainAccountEntity findByEmail(String email) {
-        return jpaRepository.findByEmail(email)
-                .orElseThrow(() -> new InfrastructurePersistenceException(
-                        "Failed to find account by email: " + email,
-                        DomainAccountEntity.class.getSimpleName(),
-                        "findByEmail"));
+        try {
+            return jpaRepository.findByEmail(email).orElse(null);
+        } catch (Exception e) {
+            throw new InfrastructurePersistenceException(
+                    "Failed to find account by email: " + email,
+                    DomainAccountEntity.class.getSimpleName(),
+                    "findByEmail");
+        }
     }
 
     @Override
     public DomainAccountEntity findById(String accountId) {
         try {
             UUID id = UUID.fromString(accountId);
-            return jpaRepository.findByAccountId(id)
-                    .orElseThrow(() -> new InfrastructurePersistenceException(
-                            "Failed to find account by id: " + accountId,
-                            DomainAccountEntity.class.getSimpleName(),
-                            "findById"));
+            return jpaRepository.findByAccountId(id).orElse(null);
         } catch (IllegalArgumentException e) {
             throw new InfrastructurePersistenceException(
                     "Invalid UUID for account id: " + accountId,
+                    DomainAccountEntity.class.getSimpleName(),
+                    "findById");
+        } catch (Exception e) {
+            throw new InfrastructurePersistenceException(
+                    "Failed to find account by id: " + accountId,
                     DomainAccountEntity.class.getSimpleName(),
                     "findById");
         }
