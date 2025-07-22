@@ -1,0 +1,73 @@
+# Development environment specific configuration
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/auth_db_dev
+    username: auth_dev_user
+    password: auth_dev_password
+    driver-class-name: org.postgresql.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+  
+  redis:
+    host: localhost
+    port: 6379
+    password: 
+
+# Mock services for development
+mock:
+  email:
+    enabled: true
+    output-directory: ./logs/emails
+  sms:
+    enabled: true
+    output-directory: ./logs/sms
+
+# Enhanced logging for development
+logging:
+  level:
+    root: DEBUG
+    ai.shreds: TRACE
+    org.springframework.security: DEBUG
+    org.springframework.web: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql: TRACE
+
+# Longer token expiration for easier testing
+jwt:
+  expiration: 86400000  # 24 hours
+
+refresh:
+  token:
+    expiration: 2592000000  # 30 days
+
+# Disable rate limiting for testing
+security:
+  rate-limiting:
+    enabled: false
+  lockout:
+    enabled: true
+    max-attempts: 10  # More lenient for development
+
+# Development OAuth2 settings
+oauth2:
+  authorization:
+    server:
+      issuer: http://localhost:8080
+      detailed-error-responses: true
+
+# Enable all actuator endpoints for development
+management:
+  endpoints:
+    web:
+      exposure:
+        include: '*'
+  endpoint:
+    health:
+      show-details: always

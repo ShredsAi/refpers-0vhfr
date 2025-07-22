@@ -1,0 +1,118 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: authentication-shred
+  
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/auth_db}
+    username: ${DATABASE_USERNAME:auth_user}
+    password: ${DATABASE_PASSWORD:auth_password}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        show_sql: false
+    show-sql: false
+  
+  redis:
+    url: ${REDIS_URL:redis://localhost:6379}
+    timeout: 2000ms
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+  
+  mail:
+    host: ${EMAIL_HOST:smtp.gmail.com}
+    port: ${EMAIL_PORT:587}
+    username: ${EMAIL_USERNAME:your-email@gmail.com}
+    password: ${EMAIL_PASSWORD:your-app-password}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 3000
+          writetimeout: 5000
+
+oauth2:
+  authorization:
+    server:
+      issuer: ${OAUTH2_ISSUER:http://localhost:8080}
+      client:
+        registration:
+          default:
+            client-id: default-client
+            client-secret: default-secret
+            authorization-grant-types:
+              - authorization_code
+              - refresh_token
+            redirect-uris:
+              - http://localhost:3000/callback
+            scopes:
+              - read
+              - write
+
+jwt:
+  secret: ${JWT_SECRET:your-secret-key-here-must-be-at-least-256-bits-long-for-hs256-algorithm}
+  expiration: ${JWT_EXPIRATION:3600000}
+  
+refresh:
+  token:
+    expiration: ${REFRESH_TOKEN_EXPIRATION:86400000}
+
+sms:
+  gateway:
+    url: ${SMS_GATEWAY_URL:https://api.smsgateway.com}
+    api-key: ${SMS_API_KEY:your-sms-api-key}
+
+security:
+  lockout:
+    max-attempts: 5
+    lockout-duration-minutes: 15
+    exponential-backoff: true
+  
+  mfa:
+    code-expiration-minutes: 5
+    totp:
+      issuer: Authentication Shred
+      digits: 6
+      period: 30
+
+logging:
+  level:
+    root: INFO
+    ai.shreds: DEBUG
+    org.springframework.security: DEBUG
+    org.springframework.web: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+  info:
+    env:
+      enabled: true
