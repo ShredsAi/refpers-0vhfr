@@ -166,6 +166,154 @@ public class OAuth2AuthorizationFlowIntegrationTest {
         testTokenRefresh(tokens.getRefreshToken());
     }
     
+    @Test
+    void When_Valid_Refresh_Token_Then_New_Access_Token_Generated(CapturedOutput output) {
+        System.out.println("====== STARTING REFRESH TOKEN TEST ======");
+        
+        // Step 1: Obtain initial tokens through OAuth2 flow
+        SharedOAuth2TokenResponseDTO initialTokens = performCompleteOAuth2Flow();
+        
+        assertThat(initialTokens).isNotNull();
+        assertThat(initialTokens.getRefreshToken()).isNotNull().isNotBlank();
+        
+        String originalRefreshToken = initialTokens.getRefreshToken();
+        String originalAccessToken = initialTokens.getAccessToken();
+        
+        System.out.println("Initial tokens obtained successfully");
+        System.out.println("Original Access Token (first 50 chars): " + originalAccessToken.substring(0, Math.min(50, originalAccessToken.length())));
+        System.out.println("Original Refresh Token (first 50 chars): " + originalRefreshToken.substring(0, Math.min(50, originalRefreshToken.length())));
+        
+        // Step 2: Use refresh token to get new access token
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        
+        MultiValueMap<String, String> refreshRequestBody = new LinkedMultiValueMap<>();
+        refreshRequestBody.add("grant_type", "refresh_token");
+        refreshRequestBody.add("refresh_token", originalRefreshToken);
+        
+        HttpEntity<MultiValueMap<String, String>> refreshRequest = new HttpEntity<>(refreshRequestBody, headers);
+        
+        System.out.println("Sending refresh token request to: " + baseUrl + "/oauth/refresh");
+        
+        ResponseEntity<SharedOAuth2TokenResponseDTO> refreshResponse = restTemplate.postForEntity(
+                baseUrl + "/oauth/refresh",
+                refreshRequest,
+                SharedOAuth2TokenResponseDTO.class
+        );
+        
+        // Step 3: Verify response
+        System.out.println("Refresh response status: " + refreshResponse.getStatusCode());
+        
+        if (!refreshResponse.getStatusCode().equals(HttpStatus.OK)) {
+            System.err.println("Refresh token request failed. Response body: " + refreshResponse.getBody());
+            System.err.println("Captured output: " + output.getOut());
+        }
+        
+        assertThat(refreshResponse.getStatusCode())
+            .as("Refresh token request should return HTTP 200")
+            .isEqualTo(HttpStatus.OK);
+        
+        assertThat(refreshResponse.getBody())
+            .as("Response body should not be null")
+            .isNotNull();
+        
+        SharedOAuth2TokenResponseDTO newTokens = refreshResponse.getBody();
+        
+        // Step 4: Verify new tokens
+        assertThat(newTokens.getAccessToken())
+            .as("New access token should be present")
+            .isNotNull()
+            .isNotBlank();
+            
+        assertThat(newTokens.getRefreshToken())
+            .as("New refresh token should be present")
+            .isNotNull()
+            .isNotBlank();
+            
+        assertThat(newTokens.getTokenType())
+            .as("Token type should be Bearer")
+            .isEqualTo("Bearer");
+            
+        assertThat(newTokens.getExpiresIn())
+            .as("Expiration time should be positive")
+            .isNotNull()
+            .isPositive();
+        
+        // Step 5: Verify token rotation (new tokens should be different from original)
+        assertThat(newTokens.getAccessToken())
+            .as("New access token should be different from original")
+            .isNotEqualTo(originalAccessToken);
+            
+        assertThat(newTokens.getRefreshToken())
+            .as("New refresh token should be different from original (token rotation)")
+            .isNotEqualTo(originalRefreshToken);
+        
+        System.out.println("New Access Token (first 50 chars): " + newTokens.getAccessToken().substring(0, Math.min(50, newTokens.getAccessToken().length())));
+        System.out.println("New Refresh Token (first 50 chars): " + newTokens.getRefreshToken().substring(0, Math.min(50, newTokens.getRefreshToken().length())));
+        
+        System.out.println("====== REFRESH TOKEN TEST COMPLETED SUCCESSFULLY ======");
+    }
+    
+    /**
+     * Helper method to perform complete OAuth2 flow and return tokens
+     * This is used by the refresh token test to obtain initial tokens
+     */
+    private SharedOAuth2TokenResponseDTO performCompleteOAuth2Flow() {
+        // Generate new PKCE parameters for this flow
+        generatePkceParameters();
+        
+        // Step 1: Initiate Authorization Request
+        String authorizationUrl = baseUrl + "/oauth/authorize" +
+                "?client_id=" + clientId +
+                "&redirect_uri=" + redirectUri +
+                "&response_type=code" +
+                "&scope=read write" +
+                "&state=" + state +
+                "&code_challenge=" + codeChallenge +
+                "&code_challenge_method=S256";
+        
+        ResponseEntity<String> authResponse = restTemplate.getForEntity(authorizationUrl, String.class);
+        
+        if (!authResponse.getStatusCode().equals(HttpStatus.FOUND)) {
+            fail("Authorization request failed with status: " + authResponse.getStatusCode());
+        }
+        
+        String locationHeader = authResponse.getHeaders().getFirst("Location");
+        if (locationHeader == null || !locationHeader.startsWith(redirectUri)) {
+            fail("Invalid redirect response: " + locationHeader);
+        }
+        
+        String authorizationCode = extractAuthorizationCodeFromUrl(locationHeader);
+        if (authorizationCode == null || authorizationCode.isBlank()) {
+            fail("Failed to extract authorization code from: " + locationHeader);
+        }
+        
+        // Step 2: Exchange Authorization Code for Tokens
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        
+        MultiValueMap<String, String> tokenRequestBody = new LinkedMultiValueMap<>();
+        tokenRequestBody.add("grant_type", "authorization_code");
+        tokenRequestBody.add("code", authorizationCode);
+        tokenRequestBody.add("redirect_uri", redirectUri);
+        tokenRequestBody.add("client_id", clientId);
+        tokenRequestBody.add("code_verifier", codeVerifier);
+        
+        HttpEntity<MultiValueMap<String, String>> tokenRequest = new HttpEntity<>(tokenRequestBody, headers);
+        
+        ResponseEntity<SharedOAuth2TokenResponseDTO> tokenResponse = restTemplate.postForEntity(
+                baseUrl + "/oauth/token",
+                tokenRequest,
+                SharedOAuth2TokenResponseDTO.class
+        );
+        
+        if (!tokenResponse.getStatusCode().equals(HttpStatus.OK)) {
+            fail("Token exchange failed with status: " + tokenResponse.getStatusCode());
+        }
+        
+        return tokenResponse.getBody();
+    }
+    
     private void testTokenRefresh(String refreshToken) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
