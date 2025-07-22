@@ -100,11 +100,12 @@ CREATE TRIGGER update_auth_sessions_updated_at BEFORE UPDATE ON authentication_s
 CREATE TRIGGER update_mfa_challenges_updated_at BEFORE UPDATE ON mfa_challenges FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Initial test data for development
+-- BCrypt hash for 'password' with cost=12: $2a$12$6.FuF3MQBqYh4Vc/6FKQEOXqYMEJN2XjrAGm7oaL5OuWH.8FxELvq
 INSERT INTO accounts (account_id, username, password_hash, email, account_status, created_at, last_login_at)
 VALUES 
-    ('550e8400-e29b-41d4-a716-446655440001', 'testuser1', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewreZNtY7BgQr9T6', 'test1@example.com', 'ACTIVE', CURRENT_TIMESTAMP, NULL),
-    ('550e8400-e29b-41d4-a716-446655440002', 'testuser2', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewreZNtY7BgQr9T6', 'test2@example.com', 'ACTIVE', CURRENT_TIMESTAMP, NULL),
-    ('550e8400-e29b-41d4-a716-446655440003', 'lockeduser', '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewreZNtY7BgQr9T6', 'locked@example.com', 'SUSPENDED', CURRENT_TIMESTAMP, NULL)
+    ('550e8400-e29b-41d4-a716-446655440001', 'testuser1', '$2a$12$6.FuF3MQBqYh4Vc/6FKQEOXqYMEJN2XjrAGm7oaL5OuWH.8FxELvq', 'test1@example.com', 'ACTIVE', CURRENT_TIMESTAMP, NULL),
+    ('550e8400-e29b-41d4-a716-446655440002', 'testuser2', '$2a$12$6.FuF3MQBqYh4Vc/6FKQEOXqYMEJN2XjrAGm7oaL5OuWH.8FxELvq', 'test2@example.com', 'ACTIVE', CURRENT_TIMESTAMP, NULL),
+    ('550e8400-e29b-41d4-a716-446655440003', 'lockeduser', '$2a$12$6.FuF3MQBqYh4Vc/6FKQEOXqYMEJN2XjrAGm7oaL5OuWH.8FxELvq', 'locked@example.com', 'SUSPENDED', CURRENT_TIMESTAMP, NULL)
 ON CONFLICT (account_id) DO NOTHING;
 
 -- Initial security settings for test users
