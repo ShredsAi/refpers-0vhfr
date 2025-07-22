@@ -25,12 +25,7 @@ public class InfrastructureSecurityRepositoryImpl implements DomainOutputPortSec
     public DomainSecuritySettingsEntity findByAccountId(String accountId) {
         try {
             UUID accountUuid = UUID.fromString(accountId);
-            return jpaRepository.findByAccountId(accountUuid)
-                    .orElseThrow(() -> new InfrastructurePersistenceException(
-                            "Security settings not found for account: " + accountId,
-                            DomainSecuritySettingsEntity.class.getSimpleName(),
-                            "findByAccountId"
-                    ));
+            return jpaRepository.findByAccountId(accountUuid).orElse(null);
         } catch (IllegalArgumentException e) {
             throw new InfrastructurePersistenceException(
                     "Invalid account ID format: " + accountId,

@@ -58,8 +58,8 @@ public class DomainAuthenticationService implements DomainInputPortAuthenticatio
 
         // Verify password
         if (!cryptoService.verifyPassword(password, account.getPasswordHash())) {
-            // Record failed attempt
-            recordFailedLoginAttempt(account.getAccountId().toString());
+            // Don't record failed attempt here - let the application service handle it
+            // in a separate transaction to avoid rollback issues
             throw new DomainInvalidCredentialsException("Invalid credentials");
         }
 

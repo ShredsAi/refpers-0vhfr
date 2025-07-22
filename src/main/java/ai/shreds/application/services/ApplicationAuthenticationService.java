@@ -4,6 +4,7 @@ import ai.shreds.application.dtos.ApplicationSessionDTO;
 import ai.shreds.application.ports.ApplicationAuthenticationInputPort;
 import ai.shreds.application.ports.ApplicationEventPublisherOutputPort;
 import ai.shreds.application.services.ApplicationJwtService;
+import ai.shreds.application.services.ApplicationFailedAuthenticationService;
 import ai.shreds.domain.ports.DomainInputPortAuthentication;
 import ai.shreds.domain.ports.DomainInputPortSecuritySettings;
 import ai.shreds.domain.ports.DomainOutputPortAccountRepository;
@@ -11,8 +12,6 @@ import ai.shreds.shared.dtos.SharedLoginRequestDTO;
 import ai.shreds.shared.dtos.SharedLoginResponseDTO;
 import ai.shreds.shared.dtos.SharedAuthenticationAttemptEventDTO;
 import ai.shreds.shared.dtos.SharedAuthenticationSuccessfulEventDTO;
-import ai.shreds.shared.dtos.SharedAuthenticationFailedEventDTO;
-import ai.shreds.shared.dtos.SharedAccountLockedEventDTO;
 import ai.shreds.shared.dtos.SharedUserLoggedOutEventDTO;
 import ai.shreds.domain.entities.DomainAccountEntity;
 import ai.shreds.domain.exceptions.DomainInvalidCredentialsException;
@@ -31,7 +30,6 @@ import java.util.UUID;
  * Application service implementing authentication operations.
  */
 @Service
-@Transactional
 public class ApplicationAuthenticationService implements ApplicationAuthenticationInputPort {
 
     private final DomainInputPortAuthentication domainAuthenticationService;
@@ -39,6 +37,7 @@ public class ApplicationAuthenticationService implements ApplicationAuthenticati
     private final ApplicationEventPublisherOutputPort eventPublisher;
     private final ApplicationJwtService jwtService;
     private final DomainOutputPortAccountRepository accountRepository;
+    private final ApplicationFailedAuthenticationService failedAuthenticationService;
 
     @Autowired
     public ApplicationAuthenticationService(
@@ -46,15 +45,18 @@ public class ApplicationAuthenticationService implements ApplicationAuthenticati
             DomainInputPortSecuritySettings domainSecurityService,
             ApplicationEventPublisherOutputPort eventPublisher,
             ApplicationJwtService jwtService,
-            DomainOutputPortAccountRepository accountRepository) {
+            DomainOutputPortAccountRepository accountRepository,
+            ApplicationFailedAuthenticationService failedAuthenticationService) {
         this.domainAuthenticationService = domainAuthenticationService;
         this.domainSecurityService = domainSecurityService;
         this.eventPublisher = eventPublisher;
         this.jwtService = jwtService;
         this.accountRepository = accountRepository;
+        this.failedAuthenticationService = failedAuthenticationService;
     }
 
     @Override
+    @Transactional
     public SharedLoginResponseDTO authenticateUser(SharedLoginRequestDTO request) {
         String accountId = null;
         try {
@@ -86,7 +88,7 @@ public class ApplicationAuthenticationService implements ApplicationAuthenticati
 
             // Check if account is locked
             if (domainSecurityService.checkAccountLockStatus(accountId)) {
-                handleFailedAuthentication(accountId, "Account is locked");
+                failedAuthenticationService.recordFailedAttempt(accountId, "Account is locked");
                 throw new DomainAccountNotActiveException("Account is locked", "LOCKED");
             }
 
@@ -105,15 +107,15 @@ public class ApplicationAuthenticationService implements ApplicationAuthenticati
             return SharedLoginResponseDTO.withTokens(session.getAccessToken(), session.getRefreshToken());
 
         } catch (DomainInvalidCredentialsException e) {
-            // Only handle failed authentication if we found the account
+            // Handle failed authentication in separate transaction to avoid rollback
             if (accountId != null) {
-                handleFailedAuthentication(accountId, "Invalid credentials");
+                failedAuthenticationService.recordFailedAttempt(accountId, "Invalid credentials");
             }
             throw e;
         } catch (DomainAccountNotActiveException e) {
-            // Only handle failed authentication if we found the account  
+            // Handle failed authentication in separate transaction to avoid rollback
             if (accountId != null) {
-                handleFailedAuthentication(accountId, "Account not active: " + e.getAccountStatus());
+                failedAuthenticationService.recordFailedAttempt(accountId, "Account not active: " + e.getAccountStatus());
             }
             throw e;
         } catch (DomainMfaRequiredException e) {
@@ -136,39 +138,12 @@ public class ApplicationAuthenticationService implements ApplicationAuthenticati
 
     @Override
     public void handleFailedAuthentication(String accountId, String reason) {
-        try {
-            // Record failed attempt in domain
-            domainAuthenticationService.recordFailedLoginAttempt(accountId);
-
-            // Get security settings to check attempts
-            var securitySettings = domainSecurityService.getSecuritySettings(accountId);
-            
-            // Publish failed authentication event
-            SharedAuthenticationFailedEventDTO failedEvent = new SharedAuthenticationFailedEventDTO();
-            failedEvent.setAccountId(accountId);
-            failedEvent.setReason(reason);
-            failedEvent.setAttempts(securitySettings.getLoginAttempts());
-            eventPublisher.publishEvent(failedEvent);
-
-            // Check if account should be locked (5 failed attempts)
-            if (securitySettings.getLoginAttempts() >= 5) {
-                // Apply lockout policy
-                domainSecurityService.applyLockoutPolicy(accountId, securitySettings.getLoginAttempts());
-                
-                // Publish account locked event
-                SharedAccountLockedEventDTO lockedEvent = new SharedAccountLockedEventDTO();
-                lockedEvent.setAccountId(accountId);
-                lockedEvent.setLockReason("Too many failed login attempts");
-                lockedEvent.setLockedUntil(Instant.now().plusSeconds(15 * 60).toString()); // 15 minutes
-                eventPublisher.publishEvent(lockedEvent);
-            }
-        } catch (Exception e) {
-            // Log error but don't throw to avoid masking original authentication error
-            System.err.println("Failed to handle failed authentication: " + e.getMessage());
-        }
+        // Delegate to the separate service
+        failedAuthenticationService.recordFailedAttempt(accountId, reason);
     }
 
     @Override
+    @Transactional
     public ApplicationSessionDTO completeAuthentication(String accountId) {
         try {
             // Record successful login
@@ -209,6 +184,7 @@ public class ApplicationAuthenticationService implements ApplicationAuthenticati
     }
 
     @Override
+    @Transactional
     public void logout(String token) {
         try {
             // Extract account ID from token

@@ -7,6 +7,8 @@ import ai.shreds.application.ports.ApplicationPasswordInputPort;
 import ai.shreds.shared.dtos.*;
 import ai.shreds.shared.exceptions.SharedAuthorizationException;
 import ai.shreds.shared.exceptions.SharedAccountLockedException;
+import ai.shreds.domain.exceptions.DomainInvalidCredentialsException;
+import ai.shreds.domain.exceptions.DomainAccountNotActiveException;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -71,6 +73,23 @@ public class AdapterAuthenticationController {
                     e.getLockedUntil(), e.getAttempts()),
                 "account_locked"
             );
+        } catch (DomainInvalidCredentialsException e) {
+            throw new AdapterInvalidRequestException(
+                "Invalid credentials", 
+                "invalid_credentials"
+            );
+        } catch (DomainAccountNotActiveException e) {
+            if ("LOCKED".equals(e.getAccountStatus())) {
+                throw new AdapterInvalidRequestException(
+                    "Account is locked", 
+                    "account_locked"
+                );
+            } else {
+                throw new AdapterInvalidRequestException(
+                    "Account is not active: " + e.getAccountStatus(), 
+                    "account_not_active"
+                );
+            }
         } catch (SharedAuthorizationException e) {
             throw new AdapterInvalidRequestException(
                 "Invalid credentials", 
@@ -229,6 +248,54 @@ public class AdapterAuthenticationController {
     }
     
     /**
+     * Exception handler for domain invalid credentials exceptions.
+     */
+    @ExceptionHandler(DomainInvalidCredentialsException.class)
+    public ResponseEntity<SharedErrorResponseDTO> handleInvalidCredentialsException(
+            DomainInvalidCredentialsException e, HttpServletRequest request) {
+        
+        SharedErrorResponseDTO errorResponse = new SharedErrorResponseDTO(
+            "invalid_credentials",
+            "Invalid username or password",
+            LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME),
+            request.getRequestURI()
+        );
+        
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorResponse);
+    }
+    
+    /**
+     * Exception handler for domain account not active exceptions.
+     */
+    @ExceptionHandler(DomainAccountNotActiveException.class)
+    public ResponseEntity<SharedErrorResponseDTO> handleAccountNotActiveException(
+            DomainAccountNotActiveException e, HttpServletRequest request) {
+        
+        HttpStatus status;
+        String errorCode;
+        String message;
+        
+        if ("LOCKED".equals(e.getAccountStatus())) {
+            status = HttpStatus.LOCKED;
+            errorCode = "account_locked";
+            message = "Account is currently locked";
+        } else {
+            status = HttpStatus.FORBIDDEN;
+            errorCode = "account_not_active";
+            message = "Account is not active: " + e.getAccountStatus();
+        }
+        
+        SharedErrorResponseDTO errorResponse = new SharedErrorResponseDTO(
+            errorCode,
+            message,
+            LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME),
+            request.getRequestURI()
+        );
+        
+        return ResponseEntity.status(status).body(errorResponse);
+    }
+    
+    /**
      * Validates the login request.
      */
     private void validateLoginRequest(SharedLoginRequestDTO request) {
@@ -291,6 +358,7 @@ public class AdapterAuthenticationController {
         return switch (errorCode) {
             case "invalid_credentials", "invalid_mfa_code" -> HttpStatus.UNAUTHORIZED;
             case "account_locked" -> HttpStatus.LOCKED;
+            case "account_not_active" -> HttpStatus.FORBIDDEN;
             case "invalid_request" -> HttpStatus.BAD_REQUEST;
             case "authentication_error", "mfa_verification_error", "logout_error" -> HttpStatus.INTERNAL_SERVER_ERROR;
             default -> HttpStatus.BAD_REQUEST;
