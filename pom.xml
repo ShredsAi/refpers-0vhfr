@@ -27,6 +27,7 @@
         <httpclient5.version>5.2.1</httpclient5.version>
         <resilience4j.version>2.3.0</resilience4j.version>
         <maven.surefire.version>3.2.5</maven.surefire.version>
+        <awaitility.version>4.2.0</awaitility.version>
     </properties>
 
     <dependencyManagement>
@@ -126,6 +127,13 @@
                     <artifactId>junit-vintage-engine</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+        <!-- Awaitility for async testing -->
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <version>${awaitility.version}</version>
+            <scope>test</scope>
         </dependency>
         <!-- Testcontainers -->
         <dependency>
