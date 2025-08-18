@@ -7,9 +7,9 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import javax.validation.Valid;
-import javax.validation.constraints.NotNull;
-import javax.validation.constraints.NotBlank;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotBlank;
 
 @Data
 @Builder
@@ -30,11 +30,12 @@ public class ApplicationTransactionRequestDTO {
     private String reference;
     
     public DomainTransactionRequest toDomainRequest() {
-        return DomainTransactionRequest.builder()
-            .amount(amount.toDomainMoneyValue())
-            .type(DomainTransactionTypeEnum.valueOf(type.toUpperCase()))
-            .description(description)
-            .reference(reference)
-            .build();
+        // Use constructor since DomainTransactionRequest has no builder
+        return new DomainTransactionRequest(
+            amount.toDomainMoneyValue(),
+            DomainTransactionTypeEnum.valueOf(type.toUpperCase()),
+            description,
+            reference
+        );
     }
 }

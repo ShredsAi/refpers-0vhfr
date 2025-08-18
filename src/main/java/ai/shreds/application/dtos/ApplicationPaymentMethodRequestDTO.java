@@ -25,22 +25,22 @@ public class ApplicationPaymentMethodRequestDTO {
     private String billingCountry;
 
     public DomainPaymentMethodRequest toDomainRequest() {
-        DomainAddressValue address = DomainAddressValue.builder()
-            .line1(billingAddressLine1)
-            .line2(billingAddressLine2)
-            .city(billingCity)
-            .state(billingState)
-            .postalCode(billingPostalCode)
-            .country(billingCountry)
-            .build();
+        DomainAddressValue address = new DomainAddressValue(
+            billingAddressLine1,
+            billingAddressLine2,
+            billingCity,
+            billingState,
+            billingPostalCode,
+            billingCountry
+        );
 
-        return DomainPaymentMethodRequest.builder()
-            .accountId(accountId)
-            .cardNumber(cardNumber)
-            .expiryMonth(expiryMonth)
-            .expiryYear(expiryYear)
-            .cvv(cvv)
-            .billingAddress(address)
-            .build();
+        return new DomainPaymentMethodRequest(
+            accountId,
+            cardNumber,
+            expiryMonth,
+            expiryYear,
+            cvv,
+            address
+        );
     }
 }

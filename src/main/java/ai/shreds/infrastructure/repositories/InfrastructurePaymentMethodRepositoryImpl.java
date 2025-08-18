@@ -3,6 +3,7 @@ package ai.shreds.infrastructure.repositories;
 import ai.shreds.domain.entities.DomainEntityPaymentMethod;
 import ai.shreds.domain.ports.DomainOutputPortPaymentMethodRepository;
 import ai.shreds.infrastructure.exceptions.InfrastructureRepositoryException;
+import ai.shreds.infrastructure.repositories.mappers.InfrastructurePaymentMethodMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 

@@ -143,8 +143,8 @@ public class InfrastructurePaymentMethodJpaEntity {
         entity.setBillingState(domain.getBillingAddress().getState());
         entity.setBillingPostalCode(domain.getBillingAddress().getPostalCode());
         entity.setBillingCountry(domain.getBillingAddress().getCountry());
-        entity.setIsDefault(domain.getIsDefault());
-        entity.setIsActive(domain.getIsActive());
+        entity.setIsDefault(domain.isDefault());
+        entity.setIsActive(domain.isActive());
         entity.setAddedAt(domain.getAddedAt());
         entity.setUpdatedAt(domain.getUpdatedAt());
         return entity;

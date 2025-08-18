@@ -1,6 +1,7 @@
 package ai.shreds.application.dtos;
 
 import ai.shreds.domain.value_objects.DomainMoneyValue;
+import ai.shreds.domain.value_objects.DomainCurrencyValue;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -17,10 +18,10 @@ public class ApplicationMoneyValue {
     private String currency;
     
     public DomainMoneyValue toDomainMoneyValue() {
-        return DomainMoneyValue.builder()
-            .amount(new BigDecimal(amount))
-            .currency(currency)
-            .build();
+        // Get currency symbol - for simplicity, using common symbols
+        String symbol = getCurrencySymbol(currency);
+        DomainCurrencyValue domainCurrency = new DomainCurrencyValue(currency, symbol);
+        return new DomainMoneyValue(new BigDecimal(amount), domainCurrency);
     }
     
     public static ApplicationMoneyValue fromDomainMoneyValue(DomainMoneyValue value) {
@@ -31,5 +32,15 @@ public class ApplicationMoneyValue {
             .amount(value.getAmount().toString())
             .currency(value.getCurrency().getCode())
             .build();
+    }
+    
+    private String getCurrencySymbol(String currencyCode) {
+        switch (currencyCode) {
+            case "USD": return "$";
+            case "EUR": return "€";
+            case "GBP": return "£";
+            case "JPY": return "¥";
+            default: return currencyCode;
+        }
     }
 }

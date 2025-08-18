@@ -2,8 +2,6 @@ package ai.shreds.infrastructure.external_services;
 
 import ai.shreds.domain.ports.DomainOutputPortPaymentGateway;
 import ai.shreds.domain.value_objects.DomainPaymentMethodDataValue;
-import ai.shreds.domain.enums.DomainPaymentTypeEnum;
-import ai.shreds.domain.enums.DomainCardBrandEnum;
 import ai.shreds.infrastructure.exceptions.InfrastructureExternalServiceException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
@@ -34,9 +32,9 @@ public class InfrastructurePaymentGatewayClient implements DomainOutputPortPayme
         try {
             InfrastructurePaymentGatewayRequestDTO request = new InfrastructurePaymentGatewayRequestDTO(
                     cardNumber, expiryMonth, expiryYear, cvv);
-            
+
             InfrastructurePaymentGatewayResponseDTO response = callTokenizationApi(request);
-            
+
             return response.toDomainPaymentMethodData();
         } catch (Exception e) {
             throw new InfrastructureExternalServiceException(
@@ -47,20 +45,20 @@ public class InfrastructurePaymentGatewayClient implements DomainOutputPortPayme
     }
 
     @Override
-    public Boolean validateToken(String token) {
+    public boolean validateToken(String token) {
         try {
             String validationUrl = apiUrl + "/validate";
             HttpHeaders headers = createHeaders();
-            
+
             HttpEntity<String> request = new HttpEntity<>(
-                    "{\"token\":\"" + token + "\"}" , headers);
-            
+                    "{\"token\":\"" + token + "\"}", headers);
+
             ResponseEntity<String> response = restTemplate.exchange(
                     validationUrl,
                     HttpMethod.POST,
                     request,
                     String.class);
-            
+
             return response.getStatusCode().is2xxSuccessful();
         } catch (Exception e) {
             handleApiError(e);
@@ -72,15 +70,15 @@ public class InfrastructurePaymentGatewayClient implements DomainOutputPortPayme
         try {
             String tokenizeUrl = apiUrl + "/tokenize";
             HttpHeaders headers = createHeaders();
-            
+
             HttpEntity<String> httpRequest = new HttpEntity<>(request.toJson(), headers);
-            
+
             ResponseEntity<InfrastructurePaymentGatewayResponseDTO> response = restTemplate.exchange(
                     tokenizeUrl,
                     HttpMethod.POST,
                     httpRequest,
                     InfrastructurePaymentGatewayResponseDTO.class);
-            
+
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
                 return response.getBody();
             } else {
@@ -107,7 +105,7 @@ public class InfrastructurePaymentGatewayClient implements DomainOutputPortPayme
         if (error instanceof InfrastructureExternalServiceException) {
             throw (InfrastructureExternalServiceException) error;
         }
-        
+
         throw new InfrastructureExternalServiceException(
                 "PaymentGateway", 
                 "Payment gateway API error: " + error.getMessage(), 

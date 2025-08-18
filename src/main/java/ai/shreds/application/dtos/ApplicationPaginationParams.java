@@ -29,11 +29,11 @@ public class ApplicationPaginationParams {
         if (toDate != null && !toDate.isEmpty()) {
             toDateTime = LocalDateTime.ofInstant(Instant.parse(toDate), ZoneId.systemDefault());
         }
-        return DomainPaginationParams.builder()
-            .page(page != null ? page : 0)
-            .size(size != null ? size : 20)
-            .fromDate(fromDateTime)
-            .toDate(toDateTime)
-            .build();
+        return new DomainPaginationParams(
+            page != null ? page : 0,
+            size != null ? size : 20,
+            fromDateTime,
+            toDateTime
+        );
     }
 }

@@ -23,7 +23,8 @@ public class ApplicationPaymentMethodActivationDTO {
         }
         return ApplicationPaymentMethodActivationDTO.builder()
             .paymentMethodId(paymentMethod.getPaymentMethodId())
-            .isActive(paymentMethod.getIsActive())
+            // Use isActive() method from DomainPaymentMethod and isActive() builder method from Lombok
+            .isActive(paymentMethod.isActive())
             .activatedAt(java.time.Instant.now().toString())
             .build();
     }

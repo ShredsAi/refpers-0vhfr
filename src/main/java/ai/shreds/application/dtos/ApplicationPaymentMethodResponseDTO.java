@@ -26,7 +26,7 @@ public class ApplicationPaymentMethodResponseDTO {
             .paymentMethodId(paymentMethod.getPaymentMethodId())
             .lastFourDigits(paymentMethod.getPaymentData().getLastFourDigits())
             .cardBrand(paymentMethod.getPaymentData().getCardBrand().name())
-            .isDefault(paymentMethod.getIsDefault())
+            .isDefault(paymentMethod.isDefault())
             .build();
     }
 }
