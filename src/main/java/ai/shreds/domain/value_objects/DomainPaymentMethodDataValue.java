@@ -2,14 +2,10 @@ package ai.shreds.domain.value_objects;
 
 import ai.shreds.domain.enums.DomainPaymentTypeEnum;
 import ai.shreds.domain.enums.DomainCardBrandEnum;
-import lombok.Builder;
-import lombok.Getter;
 import java.time.LocalDateTime;
 import java.time.Year;
 import java.util.Objects;
 
-@Builder
-@Getter
 public class DomainPaymentMethodDataValue {
     private final DomainPaymentTypeEnum paymentType;
     private final String token;
@@ -30,6 +26,30 @@ public class DomainPaymentMethodDataValue {
         this.expiryMonth = expiryMonth;
         this.expiryYear = expiryYear;
         this.cardBrand = cardBrand;
+    }
+
+    public DomainPaymentTypeEnum getPaymentType() {
+        return paymentType;
+    }
+
+    public String getToken() {
+        return token;
+    }
+
+    public String getLastFourDigits() {
+        return lastFourDigits;
+    }
+
+    public Integer getExpiryMonth() {
+        return expiryMonth;
+    }
+
+    public Integer getExpiryYear() {
+        return expiryYear;
+    }
+
+    public DomainCardBrandEnum getCardBrand() {
+        return cardBrand;
     }
 
     public boolean isExpired() {
