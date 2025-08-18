@@ -1,7 +1,11 @@
 package ai.shreds.domain.value_objects;
 
 import java.util.Objects;
+import lombok.Builder;
+import lombok.Getter;
 
+@Builder
+@Getter
 public class DomainCurrencyValue {
     private final String code;
     private final String symbol;
@@ -15,14 +19,6 @@ public class DomainCurrencyValue {
         }
         this.code = code;
         this.symbol = symbol;
-    }
-
-    public String getCode() {
-        return code;
-    }
-
-    public String getSymbol() {
-        return symbol;
     }
 
     public boolean validate() {

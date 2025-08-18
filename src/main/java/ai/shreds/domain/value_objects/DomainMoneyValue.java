@@ -3,7 +3,11 @@ package ai.shreds.domain.value_objects;
 import java.math.BigDecimal;
 import java.util.Objects;
 import ai.shreds.application.dtos.ApplicationMoneyValue;
+import lombok.Builder;
+import lombok.Getter;
 
+@Builder
+@Getter
 public class DomainMoneyValue {
     private final BigDecimal amount;
     private final DomainCurrencyValue currency;
@@ -17,14 +21,6 @@ public class DomainMoneyValue {
         }
         this.amount = amount;
         this.currency = currency;
-    }
-
-    public BigDecimal getAmount() {
-        return amount;
-    }
-
-    public DomainCurrencyValue getCurrency() {
-        return currency;
     }
 
     public DomainMoneyValue add(DomainMoneyValue other) {
