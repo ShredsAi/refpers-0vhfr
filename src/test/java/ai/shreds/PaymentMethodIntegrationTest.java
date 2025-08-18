@@ -1,32 +1,41 @@
 package ai.shreds;
 
+import ai.shreds.application.dtos.ApplicationPaymentMethodRequestDTO;
+import ai.shreds.application.dtos.ApplicationPaymentMethodResponseDTO;
+import ai.shreds.application.dtos.ApplicationPaymentMethodActivationDTO;
 import ai.shreds.application.ports.ApplicationInputPortPaymentMethod;
-import ai.shreds.infrastructure.external_services.InfrastructurePaymentGatewayClient;
-import ai.shreds.infrastructure.external_services.InfrastructurePaymentGatewayResponseDTO;
+import ai.shreds.application.ports.ApplicationInputPortFinancialAccount;
+import ai.shreds.application.ports.ApplicationOutputPortEventPublisher;
+import ai.shreds.domain.ports.DomainOutputPortPaymentMethodRepository;
+import ai.shreds.domain.ports.DomainOutputPortPaymentGateway;
+import ai.shreds.domain.ports.DomainOutputPortCurrencyService;
+import ai.shreds.domain.entities.DomainEntityPaymentMethod;
+import ai.shreds.domain.value_objects.DomainPaymentMethodDataValue;
+import ai.shreds.domain.value_objects.DomainMoneyValue;
+import ai.shreds.domain.value_objects.DomainCurrencyValue;
+import ai.shreds.domain.enums.DomainPaymentTypeEnum;
+import ai.shreds.domain.enums.DomainCardBrandEnum;
+import ai.shreds.infrastructure.repositories.InfrastructurePaymentMethodJpaEntity;
 import ai.shreds.infrastructure.repositories.InfrastructurePaymentMethodJpaRepository;
+import ai.shreds.shared.dtos.SharedAccountCreatedEventDTO;
 import ai.shreds.shared.dtos.SharedPaymentMethodRequestDTO;
 import ai.shreds.shared.dtos.SharedPaymentMethodResponseDTO;
 import ai.shreds.shared.dtos.SharedPaymentMethodActivationResponseDTO;
-import ai.shreds.shared.dtos.SharedErrorResponseDTO;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.BeforeEach;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -38,66 +47,77 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.awaitility.Awaitility.await;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.when;
 
-/**
- * Integration test for payment method lifecycle including tokenization with external payment gateway,
- * database persistence, and activation workflow.
- */
+@Slf4j
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Testcontainers
 @ActiveProfiles("test")
+@Testcontainers
 @ExtendWith(OutputCaptureExtension.class)
 class PaymentMethodIntegrationTest {
 
     @LocalServerPort
     private int port;
 
-    @Container
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15")
-            .withDatabaseName("financial_test_db")
-            .withUsername("test_user")
-            .withPassword("test_password")
-            .withReuse(true);
-
-    @Container
-    static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
-            .withExposedPorts(6379)
-            .withReuse(true);
-
-    @Container
-    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"))
-            .withReuse(true);
+    @Autowired
+    private TestRestTemplate restTemplate;
 
     @Autowired
     private ApplicationInputPortPaymentMethod paymentMethodService;
 
     @Autowired
-    private InfrastructurePaymentMethodJpaRepository paymentMethodRepository;
+    private ApplicationInputPortFinancialAccount financialAccountService;
 
     @Autowired
-    private RedisTemplate<String, String> redisTemplate;
+    private ApplicationEventPublisher eventPublisher;
 
     @Autowired
-    private TestRestTemplate restTemplate;
+    private DomainOutputPortPaymentMethodRepository paymentMethodRepository;
 
-    @MockBean
-    private KafkaTemplate<String, String> kafkaTemplate;
+    @Autowired
+    private InfrastructurePaymentMethodJpaRepository paymentMethodJpaRepository;
 
-    @MockBean
-    private InfrastructurePaymentGatewayClient paymentGatewayClient;
-
+    @Autowired
     private ObjectMapper objectMapper;
+
+    // TestContainers for external dependencies
+    @Container
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15")
+            .withDatabaseName("financial_test_db")
+            .withUsername("test_user")
+            .withPassword("test_password")
+            .withStartupTimeout(Duration.ofMinutes(2));
+
+    @Container
+    static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
+            .withExposedPorts(6379)
+            .withStartupTimeout(Duration.ofMinutes(2));
+
+    @Container
+    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"))
+            .withStartupTimeout(Duration.ofMinutes(2));
+
+    // Mock external services that are out of process
+    @MockBean
+    private DomainOutputPortPaymentGateway paymentGateway;
+
+    @MockBean
+    private DomainOutputPortCurrencyService currencyService;
+
+    @MockBean
+    private ApplicationOutputPortEventPublisher eventPublisherMock;
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
@@ -105,162 +125,290 @@ class PaymentMethodIntegrationTest {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
         
         // Redis configuration
-        registry.add("spring.redis.host", redis::getHost);
-        registry.add("spring.redis.port", () -> redis.getMappedPort(6379));
+        registry.add("spring.data.redis.host", redis::getHost);
+        registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379).toString());
         
         // Kafka configuration
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
         
-        // Mock external services
+        // Override JPA settings for test
+        registry.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
+        registry.add("spring.jpa.show-sql", () -> "true");
+        
+        // Mock external service URLs
         registry.add("financial.payment-gateway.url", () -> "http://localhost:8090/mock-payment");
         registry.add("financial.currency-service.url", () -> "http://localhost:8091/mock-currency");
+        
+        // Shorter cache TTL for tests
+        registry.add("financial.cache.ttl-seconds", () -> "60");
     }
 
     @BeforeEach
     void setUp() {
-        objectMapper = new ObjectMapper();
-        
-        // Clean up database and cache before each test
-        paymentMethodRepository.deleteAll();
-        redisTemplate.getConnectionFactory().getConnection().flushAll();
-        
-        System.out.println("✅ Test setup completed - database and cache cleared");
+        log.info("=== Setting up PaymentMethod test environment ====");
+        setupMockBehaviors();
     }
 
     @Test
     @Transactional
-    void When_PaymentMethod_Added_Then_Card_Tokenized_And_Stored_Securely() {
-        // Given
-        String accountId = UUID.randomUUID().toString();
-        String cardNumber = "4111111111111111";
-        String expectedToken = "tok_1J2x3y4z5a6b7c8d9e0f";
-        String expectedLastFour = "1111";
-        String expectedCardBrand = "VISA";
+    void When_Payment_Method_Added_Then_Card_Tokenized_And_Stored_Securely(CapturedOutput output) {
+        log.info("=== Starting Payment Method Addition Test ====");
         
-        // Mock the payment gateway tokenization response
-        InfrastructurePaymentGatewayResponseDTO mockGatewayResponse = InfrastructurePaymentGatewayResponseDTO.builder()
-                .token(expectedToken)
-                .cardBrand(expectedCardBrand)
-                .last4(expectedLastFour)
+        // Given: A financial account exists
+        String accountId = UUID.randomUUID().toString();
+        String customerId = UUID.randomUUID().toString();
+        String createdAt = Instant.now().toString();
+        
+        log.info("Test data - AccountId: {}, CustomerId: {}", accountId, customerId);
+        
+        // First create a financial account
+        SharedAccountCreatedEventDTO accountCreatedEvent = SharedAccountCreatedEventDTO.builder()
+                .accountId(accountId)
+                .customerId(customerId)
+                .createdAt(createdAt)
                 .build();
         
-        when(paymentGatewayClient.tokenizeCard(anyString(), anyInt(), anyInt(), anyString()))
-                .thenReturn(mockGatewayResponse.toDomainPaymentMethodData());
+        eventPublisher.publishEvent(accountCreatedEvent);
         
-        // Prepare payment method request
+        // Allow time for account creation
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        
+        log.info("Financial account created for testing");
+        
+        // Given: A payment method request with card details
         SharedPaymentMethodRequestDTO paymentMethodRequest = SharedPaymentMethodRequestDTO.builder()
                 .accountId(accountId)
-                .cardNumber(cardNumber)
+                .cardNumber("4111111111111111") // Test Visa card number
                 .expiryMonth(12)
                 .expiryYear(2025)
                 .cvv("123")
-                .billingAddressLine1("123 Main St")
+                .billingAddressLine1("123 Test Street")
                 .billingAddressLine2("Apt 4B")
-                .billingCity("New York")
-                .billingState("NY")
-                .billingPostalCode("10001")
+                .billingCity("Test City")
+                .billingState("Test State")
+                .billingPostalCode("12345")
                 .billingCountry("US")
                 .build();
         
-        System.out.println("🧪 Test: Adding payment method for accountId: " + accountId);
-        System.out.println("🧪 Card number (masked): ****-****-****-" + expectedLastFour);
+        log.info("Created payment method request for card ending in: {}", 
+                paymentMethodRequest.getCardNumber().substring(paymentMethodRequest.getCardNumber().length() - 4));
         
-        // When - Add payment method via REST API
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<SharedPaymentMethodRequestDTO> requestEntity = new HttpEntity<>(paymentMethodRequest, headers);
+        // When: The payment method is added via REST API
+        log.info("Adding payment method via REST API...");
+        String url = "http://localhost:" + port + "/api/v1/payment-methods";
         
-        String paymentMethodUrl = "http://localhost:" + port + "/payment-methods";
-        ResponseEntity<SharedPaymentMethodResponseDTO> response = restTemplate.exchange(
-                paymentMethodUrl, HttpMethod.POST, requestEntity, SharedPaymentMethodResponseDTO.class);
+        ResponseEntity<SharedPaymentMethodResponseDTO> response = restTemplate.postForEntity(
+                url, paymentMethodRequest, SharedPaymentMethodResponseDTO.class);
         
-        // Then - Verify payment method response
-        assertEquals(HttpStatus.CREATED, response.getStatusCode(), "Payment method should be created successfully");
-        assertNotNull(response.getBody(), "Response body should not be null");
+        log.info("Payment method addition API call completed");
         
-        SharedPaymentMethodResponseDTO paymentMethodResponse = response.getBody();
-        assertNotNull(paymentMethodResponse.getPaymentMethodId(), "Payment method ID should be generated");
-        assertEquals(expectedLastFour, paymentMethodResponse.getLastFourDigits(), "Last four digits should match");
-        assertEquals(expectedCardBrand, paymentMethodResponse.getCardBrand(), "Card brand should match");
-        assertTrue(paymentMethodResponse.getIsDefault(), "First payment method should be set as default");
+        // Then: Verify the HTTP response
+        assertThat(response.getStatusCode())
+            .as("HTTP status should be CREATED")
+            .isEqualTo(HttpStatus.CREATED);
         
-        System.out.println("✅ Payment method created successfully with ID: " + paymentMethodResponse.getPaymentMethodId());
-        System.out.println("✅ Last four digits: " + paymentMethodResponse.getLastFourDigits());
-        System.out.println("✅ Card brand: " + paymentMethodResponse.getCardBrand());
-        System.out.println("✅ Is default: " + paymentMethodResponse.getIsDefault());
+        assertThat(response.getBody())
+            .as("Response body should not be null")
+            .isNotNull();
         
-        // Verify external payment gateway was called for tokenization
-        verify(paymentGatewayClient, times(1)).tokenizeCard(
-                cardNumber, 12, 2025, "123");
-        System.out.println("✅ Payment gateway tokenization API was called correctly");
+        SharedPaymentMethodResponseDTO responseBody = response.getBody();
         
-        // Verify database persistence
-        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> {
-            var storedPaymentMethods = paymentMethodRepository.findByAccountId(UUID.fromString(accountId));
-            assertEquals(1, storedPaymentMethods.size(), "One payment method should be stored in database");
-            
-            var storedPaymentMethod = storedPaymentMethods.get(0);
-            assertEquals(UUID.fromString(accountId), storedPaymentMethod.getAccountId(), "Account ID should match");
-            assertEquals(expectedToken, storedPaymentMethod.getToken(), "Token should be stored securely");
-            assertEquals(expectedLastFour, storedPaymentMethod.getLastFourDigits(), "Last four digits should be stored");
-            assertEquals(expectedCardBrand, storedPaymentMethod.getCardBrand(), "Card brand should be stored");
-            assertEquals("CREDIT_CARD", storedPaymentMethod.getPaymentType(), "Payment type should be CREDIT_CARD");
-            assertEquals(12, storedPaymentMethod.getExpiryMonth(), "Expiry month should be stored");
-            assertEquals(2025, storedPaymentMethod.getExpiryYear(), "Expiry year should be stored");
-            assertTrue(storedPaymentMethod.getIsDefault(), "Should be set as default");
-            assertTrue(storedPaymentMethod.getIsActive(), "Should be active by default");
-            
-            // Verify billing address is stored
-            assertEquals("123 Main St", storedPaymentMethod.getBillingAddressLine1(), "Billing address line 1 should be stored");
-            assertEquals("Apt 4B", storedPaymentMethod.getBillingAddressLine2(), "Billing address line 2 should be stored");
-            assertEquals("New York", storedPaymentMethod.getBillingCity(), "Billing city should be stored");
-            assertEquals("NY", storedPaymentMethod.getBillingState(), "Billing state should be stored");
-            assertEquals("10001", storedPaymentMethod.getBillingPostalCode(), "Billing postal code should be stored");
-            assertEquals("US", storedPaymentMethod.getBillingCountry(), "Billing country should be stored");
-            
-            // Verify timestamps
-            assertNotNull(storedPaymentMethod.getAddedAt(), "Added timestamp should be set");
-            assertNotNull(storedPaymentMethod.getUpdatedAt(), "Updated timestamp should be set");
-            
-            System.out.println("✅ Payment method stored in database with token: " + storedPaymentMethod.getToken().substring(0, 10) + "...");
-            System.out.println("✅ Billing address stored: " + storedPaymentMethod.getBillingAddressLine1() + ", " + storedPaymentMethod.getBillingCity());
-        });
+        assertThat(responseBody.getPaymentMethodId())
+            .as("Payment method ID should not be null")
+            .isNotNull();
         
-        // Verify Kafka event publishing for PaymentMethodAdded
-        await().atMost(3, TimeUnit.SECONDS).untilAsserted(() -> {
-            ArgumentCaptor<String> topicCaptor = ArgumentCaptor.forClass(String.class);
-            ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
-            ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
-            
-            verify(kafkaTemplate, times(1)).send(topicCaptor.capture(), keyCaptor.capture(), messageCaptor.capture());
-            
-            String capturedTopic = topicCaptor.getValue();
-            String capturedKey = keyCaptor.getValue();
-            String capturedMessage = messageCaptor.getValue();
-            
-            assertEquals("financial-events-test", capturedTopic, "Event should be published to correct Kafka topic");
-            assertNotNull(capturedKey, "Kafka message key should not be null");
-            assertNotNull(capturedMessage, "Kafka message should not be null");
-            assertTrue(capturedMessage.contains("PAYMENT_METHOD_ADDED"), "Event should contain PAYMENT_METHOD_ADDED type");
-            assertTrue(capturedMessage.contains(accountId), "Event should contain account ID");
-            assertTrue(capturedMessage.contains(paymentMethodResponse.getPaymentMethodId()), "Event should contain payment method ID");
-            
-            System.out.println("✅ Kafka event published successfully to topic: " + capturedTopic);
-            System.out.println("✅ Event message contains: " + capturedMessage.substring(0, Math.min(200, capturedMessage.length())) + "...");
-        });
+        assertThat(responseBody.getLastFourDigits())
+            .as("Last four digits should match card number")
+            .isEqualTo("1111");
         
-        // Verify security: sensitive card data is not stored
-        var allPaymentMethods = paymentMethodRepository.findAll();
-        assertEquals(1, allPaymentMethods.size(), "Only one payment method should exist");
+        assertThat(responseBody.getCardBrand())
+            .as("Card brand should be VISA")
+            .isEqualTo("VISA");
         
-        var securityCheck = allPaymentMethods.get(0);
-        assertNotEquals(cardNumber, securityCheck.getToken(), "Original card number should not be stored as token");
-        assertFalse(securityCheck.getToken().contains(cardNumber), "Token should not contain original card number");
-        assertEquals(expectedToken, securityCheck.getToken(), "Only the secure token should be stored");
+        assertThat(responseBody.getIsDefault())
+            .as("Should be set as default (first payment method)")
+            .isTrue();
         
-        System.out.println("✅ Security verified: Original card number is not stored, only secure token");
-        System.out.println("✅ Test completed successfully: Payment method added with card tokenization, secure storage, and event publishing");
+        log.info("HTTP response verified: PaymentMethodId={}, LastFourDigits={}, CardBrand={}, IsDefault={}", 
+                responseBody.getPaymentMethodId(), responseBody.getLastFourDigits(), 
+                responseBody.getCardBrand(), responseBody.getIsDefault());
+        
+        // Verify that the payment gateway was called for tokenization
+        log.info("Verifying payment gateway tokenization was called...");
+        verify(paymentGateway, times(1)).tokenizeCard(
+                eq("4111111111111111"), 
+                eq(12), 
+                eq(2025), 
+                eq("123")
+        );
+        log.info("Payment gateway tokenization verified");
+        
+        // Verify that the payment method was stored in the database with tokenized data
+        log.info("Verifying payment method storage in database...");
+        UUID paymentMethodId = UUID.fromString(responseBody.getPaymentMethodId());
+        
+        // Check via JPA repository
+        var jpaEntity = paymentMethodJpaRepository.findById(paymentMethodId);
+        assertThat(jpaEntity)
+            .as("Payment method should exist in database")
+            .isPresent();
+        
+        InfrastructurePaymentMethodJpaEntity savedEntity = jpaEntity.get();
+        
+        assertThat(savedEntity.getAccountId())
+            .as("Account ID should match")
+            .isEqualTo(UUID.fromString(accountId));
+        
+        assertThat(savedEntity.getToken())
+            .as("Token should be stored (from payment gateway)")
+            .isEqualTo("mock_token_123");
+        
+        assertThat(savedEntity.getLastFourDigits())
+            .as("Last four digits should be stored")
+            .isEqualTo("1111");
+        
+        assertThat(savedEntity.getCardBrand())
+            .as("Card brand should be stored")
+            .isEqualTo("VISA");
+        
+        assertThat(savedEntity.getPaymentType())
+            .as("Payment type should be CREDIT_CARD")
+            .isEqualTo("CREDIT_CARD");
+        
+        assertThat(savedEntity.getIsDefault())
+            .as("Should be marked as default")
+            .isTrue();
+        
+        assertThat(savedEntity.getIsActive())
+            .as("Should be active by default")
+            .isTrue();
+        
+        // Verify billing address is stored
+        assertThat(savedEntity.getBillingAddressLine1())
+            .as("Billing address line 1 should be stored")
+            .isEqualTo("123 Test Street");
+        
+        assertThat(savedEntity.getBillingAddressLine2())
+            .as("Billing address line 2 should be stored")
+            .isEqualTo("Apt 4B");
+        
+        assertThat(savedEntity.getBillingCity())
+            .as("Billing city should be stored")
+            .isEqualTo("Test City");
+        
+        assertThat(savedEntity.getBillingState())
+            .as("Billing state should be stored")
+            .isEqualTo("Test State");
+        
+        assertThat(savedEntity.getBillingPostalCode())
+            .as("Billing postal code should be stored")
+            .isEqualTo("12345");
+        
+        assertThat(savedEntity.getBillingCountry())
+            .as("Billing country should be stored")
+            .isEqualTo("US");
+        
+        assertThat(savedEntity.getAddedAt())
+            .as("Added timestamp should be set")
+            .isNotNull();
+        
+        assertThat(savedEntity.getUpdatedAt())
+            .as("Updated timestamp should be set")
+            .isNotNull();
+        
+        log.info("Database storage verified: Token={}, LastFour={}, Brand={}, IsDefault={}, IsActive={}", 
+                savedEntity.getToken(), savedEntity.getLastFourDigits(), savedEntity.getCardBrand(), 
+                savedEntity.getIsDefault(), savedEntity.getIsActive());
+        
+        // Verify that the PaymentMethodAdded event was published
+        log.info("Verifying PaymentMethodAdded event was published...");
+        verify(eventPublisherMock, times(1)).publishPaymentMethodAdded(
+                eq(responseBody.getPaymentMethodId()), 
+                eq(accountId)
+        );
+        log.info("PaymentMethodAdded event publication verified");
+        
+        // Verify that sensitive card data is NOT stored in database
+        log.info("Verifying sensitive card data is not stored...");
+        String entityAsString = savedEntity.toString();
+        assertThat(entityAsString)
+            .as("Full card number should not be stored")
+            .doesNotContain("4111111111111111");
+        
+        assertThat(entityAsString)
+            .as("CVV should not be stored")
+            .doesNotContain("123");
+        
+        log.info("Verified sensitive card data is not stored in database");
+        
+        // Verify application logs for successful processing
+        String outputString = output.toString();
+        assertThat(outputString)
+            .as("Should contain payment method addition log")
+            .contains("Adding payment method for accountId: " + accountId);
+        
+        assertThat(outputString)
+            .as("Should contain successful addition log")
+            .contains("Successfully added payment method");
+        
+        // Verify no errors in processing
+        assertThat(outputString)
+            .as("Should not contain error logs")
+            .doesNotContain(
+                "Failed to add payment method",
+                "ERROR",
+                "Exception"
+            );
+        
+        log.info("=== Payment Method Addition Test Completed Successfully ====");
+        
+        // Log the full output for analysis
+        log.info("=== FULL TEST EXECUTION LOGS ====");
+        log.info(outputString);
+        log.info("=== END OF TEST LOGS ====");
+    }
+    
+    private void setupMockBehaviors() {
+        log.info("Setting up mock behaviors for external services");
+        
+        // Mock Payment Gateway - return tokenized card data
+        when(paymentGateway.tokenizeCard(anyString(), any(Integer.class), any(Integer.class), anyString()))
+            .thenReturn(DomainPaymentMethodDataValue.builder()
+                .paymentType(DomainPaymentTypeEnum.CREDIT_CARD)
+                .token("mock_token_123")
+                .lastFourDigits("1111")
+                .expiryMonth(12)
+                .expiryYear(2025)
+                .cardBrand(DomainCardBrandEnum.VISA)
+                .build());
+        
+        when(paymentGateway.validateToken(anyString()))
+            .thenReturn(true);
+        
+        // Mock Currency Service
+        when(currencyService.convertCurrency(any(DomainMoneyValue.class), anyString()))
+            .thenAnswer(invocation -> {
+                DomainMoneyValue amount = invocation.getArgument(0);
+                String targetCurrency = invocation.getArgument(1);
+                return DomainMoneyValue.builder()
+                    .amount(amount.getAmount())
+                    .currency(DomainCurrencyValue.builder()
+                        .code(targetCurrency)
+                        .symbol("$")
+                        .build())
+                    .build();
+            });
+        
+        when(currencyService.getExchangeRate(anyString(), anyString()))
+            .thenReturn(BigDecimal.ONE);
+        
+        log.info("Mock behaviors setup completed");
     }
 }
