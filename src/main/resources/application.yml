@@ -1,0 +1,64 @@
+spring:
+  application:
+    name: financial-payment-shred
+  profiles:
+    active: dev
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/financial_db
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: false
+
+  redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    timeout: 60s
+    jedis:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BROKERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 3
+    consumer:
+      group-id: financial-payment-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+
+server:
+  port: 8080
+
+financial:
+  payment-gateway:
+    url: ${PAYMENT_GATEWAY_URL:https://api.paymentgateway.com/v1}
+    api-key: ${PAYMENT_GATEWAY_KEY:dummy-key}
+  currency-service:
+    url: ${CURRENCY_SERVICE_URL:https://api.currencyconverter.com/v1}
+  cache:
+    ttl-seconds: 3600
+  kafka:
+    topic-name: financial-events
+
+logging:
+  level:
+    root: INFO
+    ai.shreds: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"

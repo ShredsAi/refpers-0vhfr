@@ -1,0 +1,69 @@
+spring:
+  application:
+    name: financial-payment-shred-test
+  profiles:
+    active: test
+
+  datasource:
+    # TestContainers will override these values dynamically
+    url: jdbc:postgresql://localhost:5432/testdb
+    username: test
+    password: test
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: true
+
+  redis:
+    # TestContainers will override these values dynamically
+    host: localhost
+    port: 6379
+    timeout: 60s
+    jedis:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+
+  kafka:
+    # TestContainers will override these values dynamically
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 3
+    consumer:
+      group-id: financial-payment-test-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+
+server:
+  port: 0  # Random port for testing
+
+financial:
+  payment-gateway:
+    url: http://localhost:8090/mock-payment
+    api-key: test-key
+  currency-service:
+    url: http://localhost:8091/mock-currency
+  cache:
+    ttl-seconds: 60  # Shorter TTL for tests
+  kafka:
+    topic-name: financial-events-test
+
+logging:
+  level:
+    root: WARN
+    ai.shreds: DEBUG
+    org.springframework.boot.test: DEBUG
+    org.testcontainers: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
