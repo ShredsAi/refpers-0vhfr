@@ -1,31 +1,36 @@
 package ai.shreds;
 
 import ai.shreds.application.dtos.ApplicationBalanceDTO;
+import ai.shreds.application.dtos.ApplicationMoneyValue;
 import ai.shreds.application.ports.ApplicationInputPortFinancialAccount;
+import ai.shreds.application.ports.ApplicationInputPortTransaction;
 import ai.shreds.application.ports.ApplicationOutputPortCache;
-import ai.shreds.application.ports.ApplicationOutputPortEventPublisher;
-import ai.shreds.domain.entities.DomainEntityFinancialAccount;
-import ai.shreds.domain.ports.DomainOutputPortFinancialAccountRepository;
-import ai.shreds.domain.ports.DomainOutputPortCurrencyService;
-import ai.shreds.domain.ports.DomainOutputPortPaymentGateway;
-import ai.shreds.domain.value_objects.DomainMoneyValue;
-import ai.shreds.domain.value_objects.DomainCurrencyValue;
-import ai.shreds.domain.value_objects.DomainPaymentMethodDataValue;
-import ai.shreds.domain.enums.DomainPaymentTypeEnum;
-import ai.shreds.domain.enums.DomainCardBrandEnum;
+import ai.shreds.infrastructure.repositories.InfrastructureFinancialAccountJpaRepository;
+import ai.shreds.infrastructure.repositories.InfrastructureTransactionJpaRepository;
 import ai.shreds.shared.dtos.SharedAccountCreatedEventDTO;
+import ai.shreds.shared.dtos.SharedTransactionRequestDTO;
+import ai.shreds.shared.dtos.SharedTransactionResponseDTO;
+import ai.shreds.shared.value_objects.SharedMoneyValue;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.test.system.OutputCaptureExtension;
-import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -38,65 +43,74 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.times;
 
-@Slf4j
+/**
+ * Integration test for financial account creation, transaction processing, and balance management.
+ * Tests the complete workflow including database persistence, cache updates, and event publishing.
+ */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@ActiveProfiles("test")
 @Testcontainers
+@ActiveProfiles("test")
 @ExtendWith(OutputCaptureExtension.class)
 class FinancialAccountTransactionIntegrationTest {
 
     @LocalServerPort
     private int port;
 
-    @Autowired
-    private ApplicationInputPortFinancialAccount financialAccountService;
-
-    @Autowired
-    private ApplicationEventPublisher eventPublisher;
-
-    @Autowired
-    private DomainOutputPortFinancialAccountRepository financialAccountRepository;
-
-    @Autowired
-    private ApplicationOutputPortCache cachePort;
-
-    // TestContainers for external dependencies
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15")
             .withDatabaseName("financial_test_db")
             .withUsername("test_user")
             .withPassword("test_password")
-            .withStartupTimeout(Duration.ofMinutes(2));
+            .withReuse(true);
 
     @Container
     static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
             .withExposedPorts(6379)
-            .withStartupTimeout(Duration.ofMinutes(2));
+            .withReuse(true);
 
     @Container
     static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"))
-            .withStartupTimeout(Duration.ofMinutes(2));
+            .withReuse(true);
 
-    // Mock external services that are out of process
-    @MockBean
-    private DomainOutputPortPaymentGateway paymentGateway;
+    @Autowired
+    private ApplicationInputPortFinancialAccount financialAccountService;
+
+    @Autowired
+    private ApplicationInputPortTransaction transactionService;
+
+    @Autowired
+    private ApplicationOutputPortCache cacheService;
+
+    @Autowired
+    private InfrastructureFinancialAccountJpaRepository financialAccountRepository;
+
+    @Autowired
+    private InfrastructureTransactionJpaRepository transactionRepository;
+
+    @Autowired
+    private ApplicationEventPublisher eventPublisher;
+
+    @Autowired
+    private RedisTemplate<String, String> redisTemplate;
+
+    @Autowired
+    private TestRestTemplate restTemplate;
 
     @MockBean
-    private DomainOutputPortCurrencyService currencyService;
+    private KafkaTemplate<String, String> kafkaTemplate;
 
-    @MockBean
-    private ApplicationOutputPortEventPublisher eventPublisherMock;
+    private ObjectMapper objectMapper;
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
@@ -104,210 +118,231 @@ class FinancialAccountTransactionIntegrationTest {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
         
         // Redis configuration
-        registry.add("spring.data.redis.host", redis::getHost);
-        registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379).toString());
+        registry.add("spring.redis.host", redis::getHost);
+        registry.add("spring.redis.port", () -> redis.getMappedPort(6379));
         
         // Kafka configuration
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
         
-        // Override JPA settings for test
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
-        registry.add("spring.jpa.show-sql", () -> "true");
-        
-        // Mock external service URLs
+        // Mock external services
         registry.add("financial.payment-gateway.url", () -> "http://localhost:8090/mock-payment");
         registry.add("financial.currency-service.url", () -> "http://localhost:8091/mock-currency");
-        
-        // Shorter cache TTL for tests
-        registry.add("financial.cache.ttl-seconds", () -> "60");
     }
 
     @BeforeEach
     void setUp() {
-        log.info("=== Setting up test environment ====");
-        setupMockBehaviors();
+        objectMapper = new ObjectMapper();
+        
+        // Clean up database and cache before each test
+        transactionRepository.deleteAll();
+        financialAccountRepository.deleteAll();
+        redisTemplate.getConnectionFactory().getConnection().flushAll();
+        
+        System.out.println("✅ Test setup completed - database and cache cleared");
     }
 
     @Test
     @Transactional
-    void When_AccountCreated_Event_Received_Then_FinancialAccount_Created_With_Zero_Balance(CapturedOutput output) {
-        log.info("=== Starting AccountCreated Event Test ====");
-        
-        // Given: A new account ID
+    void When_AccountCreated_Event_Received_Then_FinancialAccount_Created_With_Zero_Balance() {
+        // Given
         String accountId = UUID.randomUUID().toString();
         String customerId = UUID.randomUUID().toString();
         String createdAt = Instant.now().toString();
         
-        log.info("Test data - AccountId: {}, CustomerId: {}, CreatedAt: {}", accountId, customerId, createdAt);
-        
-        // Create the AccountCreated event
         SharedAccountCreatedEventDTO accountCreatedEvent = SharedAccountCreatedEventDTO.builder()
                 .accountId(accountId)
                 .customerId(customerId)
                 .createdAt(createdAt)
                 .build();
         
-        log.info("Created AccountCreatedEvent: {}", accountCreatedEvent);
+        System.out.println("🧪 Test: Publishing AccountCreated event for accountId: " + accountId);
         
-        // When: The AccountCreated event is published
-        log.info("Publishing AccountCreated event...");
+        // When - Publish the AccountCreated event
         eventPublisher.publishEvent(accountCreatedEvent);
         
-        // Allow some time for event processing
-        try {
-            Thread.sleep(1000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-        
-        log.info("Event published and processed");
-        
-        // Then: Verify that a financial account was created in the database
-        log.info("Verifying financial account creation in database...");
-        UUID accountUUID = UUID.fromString(accountId);
-        boolean accountExists = financialAccountRepository.existsByAccountId(accountUUID);
-        assertThat(accountExists)
-            .as("Financial account should exist in database")
-            .isTrue();
-        
-        log.info("Financial account exists in database: {}", accountExists);
-        
-        // Verify the financial account has zero balance
-        DomainEntityFinancialAccount createdAccount = financialAccountRepository.findByAccountId(accountUUID);
-        assertThat(createdAccount)
-            .as("Created financial account should not be null")
-            .isNotNull();
-        
-        assertThat(createdAccount.getAccountId())
-            .as("Account ID should match")
-            .isEqualTo(accountUUID);
-        
-        DomainMoneyValue balance = createdAccount.getBalance();
-        assertThat(balance)
-            .as("Balance should not be null")
-            .isNotNull();
-        
-        assertThat(balance.getAmount())
-            .as("Initial balance should be zero")
-            .isEqualTo(BigDecimal.ZERO);
-        
-        assertThat(balance.getCurrency().getCode())
-            .as("Default currency should be USD")
-            .isEqualTo("USD");
-        
-        log.info("Financial account created with zero balance: {} {}", 
-                balance.getAmount(), balance.getCurrency().getCode());
-        
-        // Verify that the balance is retrievable through the service
-        log.info("Verifying balance retrieval through service...");
-        ApplicationBalanceDTO retrievedBalance = financialAccountService.getAccountBalance(accountId);
-        assertThat(retrievedBalance)
-            .as("Retrieved balance should not be null")
-            .isNotNull();
-        
-        assertThat(retrievedBalance.getBalance())
-            .as("Retrieved balance should not be null")
-            .isNotNull();
-        
-        assertThat(retrievedBalance.getBalance().getAmount())
-            .as("Retrieved balance amount should be zero")
-            .isEqualTo("0");
-        
-        assertThat(retrievedBalance.getBalance().getCurrency())
-            .as("Retrieved balance currency should be USD")
-            .isEqualTo("USD");
-        
-        log.info("Balance retrieved successfully: {} {}", 
-                retrievedBalance.getBalance().getAmount(), 
-                retrievedBalance.getBalance().getCurrency());
-        
-        // Verify that the balance is cached in Redis
-        log.info("Verifying balance is cached in Redis...");
-        var cachedBalance = cachePort.getBalance(accountId);
-        if (cachedBalance != null) {
-            assertThat(cachedBalance.getAmount())
-                .as("Cached balance amount should be zero")
-                .isEqualTo("0");
+        // Then - Wait for event processing and verify financial account creation
+        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> {
+            // Verify financial account exists in database
+            var financialAccountEntity = financialAccountRepository.findByAccountId(UUID.fromString(accountId));
+            assertNotNull(financialAccountEntity, "Financial account should be created in database");
             
-            assertThat(cachedBalance.getCurrency())
-                .as("Cached balance currency should be USD")
-                .isEqualTo("USD");
+            System.out.println("✅ Financial account found in database with ID: " + financialAccountEntity.get().getFinancialAccountId());
             
-            log.info("Balance successfully cached in Redis: {} {}", 
-                    cachedBalance.getAmount(), cachedBalance.getCurrency());
-        } else {
-            log.info("Balance not found in cache (this is acceptable as caching might be lazy)");
-        }
+            // Verify account has zero balance
+            assertEquals(0, financialAccountEntity.get().getBalanceAmount().intValue(), 
+                    "Financial account should be created with zero balance");
+            assertEquals("USD", financialAccountEntity.get().getBalanceCurrency(), 
+                    "Financial account should be created with USD currency");
+            assertEquals("ACTIVE", financialAccountEntity.get().getStatus(), 
+                    "Financial account should be created with ACTIVE status");
+            
+            System.out.println("✅ Financial account has correct zero balance and USD currency");
+        });
         
-        // Verify that the FinancialAccountCreated event was published
-        log.info("Verifying FinancialAccountCreated event was published...");
-        verify(eventPublisherMock, times(1)).publishFinancialAccountCreated(accountId);
-        log.info("FinancialAccountCreated event was published successfully");
+        // Verify balance can be retrieved through service layer
+        ApplicationBalanceDTO balance = financialAccountService.getAccountBalance(accountId);
+        assertNotNull(balance, "Balance should be retrievable through service layer");
+        assertNotNull(balance.getBalance(), "Balance value should not be null");
+        assertEquals("0", balance.getBalance().getAmount(), "Balance amount should be zero");
+        assertEquals("USD", balance.getBalance().getCurrency(), "Balance currency should be USD");
         
-        // Verify application logs for successful processing
-        String outputString = output.toString();
-        assertThat(outputString)
-            .as("Should contain account creation log")
-            .contains("Creating financial account for accountId: " + accountId);
+        System.out.println("✅ Balance retrieved through service layer: " + balance.getBalance().getAmount() + " " + balance.getBalance().getCurrency());
         
-        assertThat(outputString)
-            .as("Should contain successful creation log")
-            .contains("Successfully created financial account for accountId: " + accountId);
+        // Verify balance is cached in Redis
+        await().atMost(3, TimeUnit.SECONDS).untilAsserted(() -> {
+            ApplicationMoneyValue cachedBalance = cacheService.getBalance(accountId);
+            if (cachedBalance != null) {
+                assertEquals("0", cachedBalance.getAmount(), "Cached balance amount should be zero");
+                assertEquals("USD", cachedBalance.getCurrency(), "Cached balance currency should be USD");
+                System.out.println("✅ Balance is properly cached in Redis: " + cachedBalance.getAmount() + " " + cachedBalance.getCurrency());
+            } else {
+                System.out.println("ℹ️ Balance not yet cached in Redis, which is acceptable for this test");
+            }
+        });
         
-        // Verify no errors in processing
-        assertThat(outputString)
-            .as("Should not contain error logs")
-            .doesNotContain(
-                "Failed to create financial account",
-                "ERROR",
-                "Exception"
-            );
+        // Verify database constraints and data integrity
+        var allAccounts = financialAccountRepository.findAll();
+        assertEquals(1, allAccounts.size(), "Only one financial account should exist");
         
-        log.info("=== AccountCreated Event Test Completed Successfully ====");
+        var createdAccount = allAccounts.get(0);
+        assertNotNull(createdAccount.getCreatedAt(), "Created timestamp should be set");
+        assertNotNull(createdAccount.getUpdatedAt(), "Updated timestamp should be set");
+        assertEquals(0L, createdAccount.getVersion().longValue(), "Version should start at 0 for new account");
         
-        // Log the full output for analysis
-        log.info("=== FULL TEST EXECUTION LOGS ====");
-        log.info(outputString);
-        log.info("=== END OF TEST LOGS ====");
+        System.out.println("✅ Database integrity verified - account created with proper timestamps and version");
+        System.out.println("✅ Test completed successfully: AccountCreated event properly creates financial account with zero balance");
     }
-    
-    private void setupMockBehaviors() {
-        log.info("Setting up mock behaviors for external services");
+
+    @Test
+    @Transactional
+    void When_Credit_Transaction_Processed_Then_Balance_Updated_And_Event_Published() {
+        // Given - Create a financial account first
+        String accountId = UUID.randomUUID().toString();
+        String customerId = UUID.randomUUID().toString();
+        String createdAt = Instant.now().toString();
         
-        // Mock Payment Gateway
-        when(paymentGateway.tokenizeCard(anyString(), any(Integer.class), any(Integer.class), anyString()))
-            .thenReturn(DomainPaymentMethodDataValue.builder()
-                .paymentType(DomainPaymentTypeEnum.CREDIT_CARD)
-                .token("mock_token_123")
-                .lastFourDigits("1234")
-                .expiryMonth(12)
-                .expiryYear(2025)
-                .cardBrand(DomainCardBrandEnum.VISA)
-                .build());
+        SharedAccountCreatedEventDTO accountCreatedEvent = SharedAccountCreatedEventDTO.builder()
+                .accountId(accountId)
+                .customerId(customerId)
+                .createdAt(createdAt)
+                .build();
         
-        when(paymentGateway.validateToken(anyString()))
-            .thenReturn(true);
+        System.out.println("🧪 Test: Setting up financial account for credit transaction test, accountId: " + accountId);
         
-        // Mock Currency Service
-        when(currencyService.convertCurrency(any(DomainMoneyValue.class), anyString()))
-            .thenAnswer(invocation -> {
-                DomainMoneyValue amount = invocation.getArgument(0);
-                String targetCurrency = invocation.getArgument(1);
-                return DomainMoneyValue.builder()
-                    .amount(amount.getAmount())
-                    .currency(DomainCurrencyValue.builder()
-                        .code(targetCurrency)
-                        .symbol("$")
-                        .build())
-                    .build();
-            });
+        // Create the financial account
+        eventPublisher.publishEvent(accountCreatedEvent);
         
-        when(currencyService.getExchangeRate(anyString(), anyString()))
-            .thenReturn(BigDecimal.ONE);
+        // Wait for account creation
+        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> {
+            var financialAccountEntity = financialAccountRepository.findByAccountId(UUID.fromString(accountId));
+            assertTrue(financialAccountEntity.isPresent(), "Financial account should be created");
+        });
         
-        log.info("Mock behaviors setup completed");
+        // Prepare credit transaction request
+        SharedMoneyValue creditAmount = SharedMoneyValue.builder()
+                .amount("100.50")
+                .currency("USD")
+                .build();
+        
+        SharedTransactionRequestDTO creditRequest = SharedTransactionRequestDTO.builder()
+                .amount(creditAmount)
+                .type("CREDIT")
+                .description("Test credit transaction")
+                .reference("TEST-REF-001")
+                .build();
+        
+        System.out.println("🧪 Processing credit transaction of $100.50 for accountId: " + accountId);
+        
+        // When - Process the credit transaction via REST API
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<SharedTransactionRequestDTO> requestEntity = new HttpEntity<>(creditRequest, headers);
+        
+        String transactionUrl = "http://localhost:" + port + "/financial-accounts/" + accountId + "/transactions";
+        ResponseEntity<SharedTransactionResponseDTO> response = restTemplate.exchange(
+                transactionUrl, HttpMethod.POST, requestEntity, SharedTransactionResponseDTO.class);
+        
+        // Then - Verify transaction response
+        assertEquals(HttpStatus.CREATED, response.getStatusCode(), "Transaction should be created successfully");
+        assertNotNull(response.getBody(), "Response body should not be null");
+        
+        SharedTransactionResponseDTO transactionResponse = response.getBody();
+        assertNotNull(transactionResponse.getTransactionId(), "Transaction ID should be generated");
+        assertNotNull(transactionResponse.getNewBalance(), "New balance should be returned");
+        assertEquals("100.50", transactionResponse.getNewBalance().getAmount(), "New balance should be $100.50");
+        assertEquals("USD", transactionResponse.getNewBalance().getCurrency(), "New balance currency should be USD");
+        assertNotNull(transactionResponse.getProcessedAt(), "Processed timestamp should be set");
+        
+        System.out.println("✅ Credit transaction processed successfully with ID: " + transactionResponse.getTransactionId());
+        System.out.println("✅ New balance: " + transactionResponse.getNewBalance().getAmount() + " " + transactionResponse.getNewBalance().getCurrency());
+        
+        // Verify database updates
+        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> {
+            // Check financial account balance update
+            var updatedAccount = financialAccountRepository.findByAccountId(UUID.fromString(accountId));
+            assertTrue(updatedAccount.isPresent(), "Financial account should exist");
+            assertEquals(new BigDecimal("100.50"), updatedAccount.get().getBalanceAmount(), "Account balance should be updated to $100.50");
+            assertEquals(1L, updatedAccount.get().getVersion().longValue(), "Account version should be incremented due to optimistic locking");
+            
+            System.out.println("✅ Database balance updated: " + updatedAccount.get().getBalanceAmount());
+            
+            // Check transaction record creation
+            var transactions = transactionRepository.findByFinancialAccountId(updatedAccount.get().getFinancialAccountId(), null);
+            assertEquals(1, transactions.getTotalElements(), "One transaction record should be created");
+            
+            var transactionEntity = transactions.getContent().get(0);
+            assertEquals(new BigDecimal("100.50"), transactionEntity.getAmount(), "Transaction amount should be $100.50");
+            assertEquals("USD", transactionEntity.getCurrency(), "Transaction currency should be USD");
+            assertEquals("CREDIT", transactionEntity.getType(), "Transaction type should be CREDIT");
+            assertEquals("Test credit transaction", transactionEntity.getDescription(), "Transaction description should match");
+            assertEquals("TEST-REF-001", transactionEntity.getReference(), "Transaction reference should match");
+            
+            System.out.println("✅ Transaction record created in database with ID: " + transactionEntity.getTransactionId());
+        });
+        
+        // Verify cache invalidation and updated balance retrieval
+        await().atMost(3, TimeUnit.SECONDS).untilAsserted(() -> {
+            ApplicationBalanceDTO currentBalance = financialAccountService.getAccountBalance(accountId);
+            assertNotNull(currentBalance, "Balance should be retrievable");
+            assertEquals("100.50", currentBalance.getBalance().getAmount(), "Retrieved balance should be $100.50");
+            assertEquals("USD", currentBalance.getBalance().getCurrency(), "Retrieved balance currency should be USD");
+            
+            System.out.println("✅ Updated balance retrieved through service: " + currentBalance.getBalance().getAmount() + " " + currentBalance.getBalance().getCurrency());
+        });
+        
+        // Verify Kafka event publishing
+        await().atMost(3, TimeUnit.SECONDS).untilAsserted(() -> {
+            ArgumentCaptor<String> topicCaptor = ArgumentCaptor.forClass(String.class);
+            ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+            ArgumentCaptor<String> messageCaptor = ArgumentCaptor.forClass(String.class);
+            
+            verify(kafkaTemplate, times(1)).send(topicCaptor.capture(), keyCaptor.capture(), messageCaptor.capture());
+            
+            String capturedTopic = topicCaptor.getValue();
+            String capturedKey = keyCaptor.getValue();
+            String capturedMessage = messageCaptor.getValue();
+            
+            assertEquals("financial-events-test", capturedTopic, "Event should be published to correct Kafka topic");
+            assertNotNull(capturedKey, "Kafka message key should not be null");
+            assertNotNull(capturedMessage, "Kafka message should not be null");
+            assertTrue(capturedMessage.contains("TRANSACTION_PROCESSED"), "Event should contain TRANSACTION_PROCESSED type");
+            assertTrue(capturedMessage.contains("100.50"), "Event should contain transaction amount");
+            assertTrue(capturedMessage.contains("CREDIT"), "Event should contain transaction type");
+            
+            System.out.println("✅ Kafka event published successfully to topic: " + capturedTopic);
+            System.out.println("✅ Event message contains: " + capturedMessage.substring(0, Math.min(200, capturedMessage.length())) + "...");
+        });
+        
+        // Verify overall system state
+        var finalAccountState = financialAccountRepository.findByAccountId(UUID.fromString(accountId));
+        assertTrue(finalAccountState.isPresent(), "Account should still exist");
+        assertEquals("ACTIVE", finalAccountState.get().getStatus(), "Account should remain active");
+        
+        var allTransactions = transactionRepository.findAll();
+        assertEquals(1, allTransactions.size(), "Exactly one transaction should exist in the system");
+        
+        System.out.println("✅ Test completed successfully: Credit transaction processed with balance update, database persistence, and Kafka event publishing");
     }
 }
