@@ -17,6 +17,9 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.servlet.NoHandlerFoundException;
 
 import ai.shreds.application.exceptions.ApplicationServiceException;
+import ai.shreds.domain.exceptions.DomainInsufficientFundsException;
+import ai.shreds.domain.exceptions.DomainAccountFrozenException;
+import ai.shreds.domain.exceptions.DomainInvalidCurrencyException;
 import ai.shreds.shared.dtos.SharedErrorResponseDTO;
 
 import java.util.stream.Collectors;
@@ -27,6 +30,48 @@ import java.util.stream.Collectors;
  */
 @ControllerAdvice
 public class AdapterGlobalExceptionHandler {
+
+    /**
+     * Handles domain insufficient funds exceptions.
+     */
+    @ExceptionHandler(DomainInsufficientFundsException.class)
+    public ResponseEntity<SharedErrorResponseDTO> handleInsufficientFundsException(
+            DomainInsufficientFundsException ex, HttpServletRequest request) {
+        SharedErrorResponseDTO errorResponse = SharedErrorResponseDTO.create(
+            "INSUFFICIENT_FUNDS",
+            ex.getMessage(),
+            request.getRequestURI()
+        );
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+    }
+
+    /**
+     * Handles domain account frozen exceptions.
+     */
+    @ExceptionHandler(DomainAccountFrozenException.class)
+    public ResponseEntity<SharedErrorResponseDTO> handleAccountFrozenException(
+            DomainAccountFrozenException ex, HttpServletRequest request) {
+        SharedErrorResponseDTO errorResponse = SharedErrorResponseDTO.create(
+            "ACCOUNT_FROZEN",
+            ex.getMessage(),
+            request.getRequestURI()
+        );
+        return ResponseEntity.status(HttpStatus.LOCKED).body(errorResponse);
+    }
+
+    /**
+     * Handles domain invalid currency exceptions.
+     */
+    @ExceptionHandler(DomainInvalidCurrencyException.class)
+    public ResponseEntity<SharedErrorResponseDTO> handleInvalidCurrencyException(
+            DomainInvalidCurrencyException ex, HttpServletRequest request) {
+        SharedErrorResponseDTO errorResponse = SharedErrorResponseDTO.create(
+            "INVALID_CURRENCY",
+            ex.getMessage(),
+            request.getRequestURI()
+        );
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
+    }
 
     /**
      * Handles adapter-specific service exceptions.
